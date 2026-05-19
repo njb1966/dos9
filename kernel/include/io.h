@@ -1,0 +1,17 @@
+#pragma once
+#include <stdint.h>
+
+static inline void outb(uint16_t port, uint8_t val) {
+    __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
+}
+
+static inline uint8_t inb(uint16_t port) {
+    uint8_t val;
+    __asm__ volatile("inb %1, %0" : "=a"(val) : "Nd"(port));
+    return val;
+}
+
+/* ~1μs delay by writing to an unused port — needed between PIC commands */
+static inline void io_wait(void) {
+    outb(0x80, 0);
+}
