@@ -88,8 +88,26 @@ void process_init(void) {
     irq_register(IRQ_TIMER, timer_tick);
 }
 
+/* Recycle a dead slot or claim the next free one.  Frees the dead
+   process's kernel stack and struct; user page directories are not
+   freed here (no PMM walk API yet — known leak). */
+static int proc_alloc_slot(void) {
+    for (int i = 0; i < n_procs; i++) {
+        process_t *old = proc_table[i];
+        if (old && old->state == PROC_DEAD) {
+            if (old->stack) kfree(old->stack);
+            kfree(old);
+            proc_table[i] = NULL;
+            return i;
+        }
+    }
+    if (n_procs >= MAX_PROCS) return -1;
+    return n_procs++;
+}
+
 process_t *process_create(void (*entry)(void), const char *name) {
-    if (n_procs >= MAX_PROCS) return NULL;
+    int slot = proc_alloc_slot();
+    if (slot < 0) return NULL;
 
     process_t *p   = kmalloc(sizeof(process_t));
     uint8_t   *stk = kmalloc(KSTACK_SIZE);
@@ -121,7 +139,7 @@ process_t *process_create(void (*entry)(void), const char *name) {
     p->entry    = entry;
     p->stack    = stk;
 
-    proc_table[n_procs++] = p;
+    proc_table[slot] = p;
     return p;
 }
 
@@ -167,7 +185,7 @@ void schedule(void) {
 
     process_t *prev = proc_table[cur];
     process_t *nxt  = proc_table[next];
-    prev->state = PROC_READY;
+    if (prev->state != PROC_DEAD) prev->state = PROC_READY;
     nxt->state  = PROC_RUNNING;
     cur         = next;
     /* Keep TSS.esp0 pointing at the new process's kernel stack top so that
@@ -179,7 +197,8 @@ void schedule(void) {
 
 process_t *process_create_user(uint32_t entry_vaddr, const char *name,
                                 uint32_t pd_phys) {
-    if (n_procs >= MAX_PROCS) return NULL;
+    int slot = proc_alloc_slot();
+    if (slot < 0) return NULL;
 
     process_t *p   = kmalloc(sizeof(process_t));
     uint8_t   *stk = kmalloc(KSTACK_SIZE);
@@ -210,6 +229,6 @@ process_t *process_create_user(uint32_t entry_vaddr, const char *name,
     p->stack      = stk;
     p->user_stack = USER_STACK_TOP;
 
-    proc_table[n_procs++] = p;
+    proc_table[slot] = p;
     return p;
 }

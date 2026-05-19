@@ -82,7 +82,7 @@ static void *slurp(const char *path, uint32_t *size_out) {
     int fd = vfs_open(path, O_RDONLY);
     if (fd < 0) return NULL;
 
-    #define SLURP_MAX (64u * 1024u)
+    #define SLURP_MAX (256u * 1024u)
     uint8_t *buf = kmalloc(SLURP_MAX);
     if (!buf) { vfs_close(fd); return NULL; }
 
