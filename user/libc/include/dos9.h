@@ -11,6 +11,7 @@
 #define SYS_CLOSE  4
 #define SYS_LSEEK  5
 #define SYS_GETPID 6
+#define SYS_BRK    7
 
 /* ── File descriptor constants ────────────────────────────────────────── */
 #define STDIN_FILENO  0
@@ -71,6 +72,13 @@ static inline int getpid(void) {
     return (int)_syscall3(SYS_GETPID, 0, 0, 0);
 }
 
+/* sbrk — extend the heap by `increment` bytes; returns old break.
+   Pass 0 to query the current break without moving it. */
+static inline void *sbrk(int32_t increment) {
+    int32_t ret = _syscall1(SYS_BRK, increment);
+    return (void *)(int32_t)ret;   /* (void*)-1 on error */
+}
+
 /* ── stdio ──────────────────────────────────────────────────────────────── */
 void putchar(int c);
 int  puts(const char *s);
@@ -87,4 +95,8 @@ void  *memset(void *dst, int c, size_t n);
 void  *memcpy(void *dst, const void *src, size_t n);
 
 /* ── stdlib ─────────────────────────────────────────────────────────────── */
-void exit(int code);
+void  exit(int code);
+void *malloc(size_t size);
+void *calloc(size_t nmemb, size_t size);
+void *realloc(void *ptr, size_t size);
+void  free(void *ptr);

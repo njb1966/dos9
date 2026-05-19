@@ -9,6 +9,7 @@
 #define SYS_CLOSE  4
 #define SYS_LSEEK  5
 #define SYS_GETPID 6
+#define SYS_BRK    7
 
 /* Install the int 0x80 IDT gate. */
 void syscall_init(void);

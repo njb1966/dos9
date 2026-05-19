@@ -141,6 +141,7 @@ process_t *process_create(void (*entry)(void), const char *name) {
     name_copy(p->name, name);
     p->entry    = entry;
     p->stack    = stk;
+    p->brk      = 0;
     memset(p->fds, 0, sizeof(p->fds));
 
     proc_table[slot] = p;
@@ -233,6 +234,7 @@ process_t *process_create_user(uint32_t entry_vaddr, const char *name,
     p->entry      = (void (*)(void))(uintptr_t)entry_vaddr;
     p->stack      = stk;
     p->user_stack = USER_STACK_TOP;
+    p->brk        = 0;     /* set by cmd_exec after elf_load() returns brk_out */
     memset(p->fds, 0, sizeof(p->fds));
     vfs_inherit_stdio(proc_table[cur]->fds, p->fds);
 
@@ -246,4 +248,8 @@ uint32_t process_getpid(void) {
 
 file_t *process_current_fds(void) {
     return proc_table[cur]->fds;
+}
+
+process_t *process_current(void) {
+    return proc_table[cur];
 }

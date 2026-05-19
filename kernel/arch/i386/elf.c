@@ -24,7 +24,8 @@ static uint8_t *user_kaddr(uint32_t pd_phys, uint32_t vaddr) {
     return (uint8_t *)VIRT(pt[pt_idx] & ~0xFFFu) + pg_off;
 }
 
-uint32_t elf_load(const void *data, uint32_t size, uint32_t *pd_out) {
+uint32_t elf_load(const void *data, uint32_t size,
+                  uint32_t *pd_out, uint32_t *brk_out) {
     const uint8_t   *bin  = (const uint8_t *)data;
     const Elf32_Ehdr *ehdr = (const Elf32_Ehdr *)bin;
 
@@ -37,7 +38,8 @@ uint32_t elf_load(const void *data, uint32_t size, uint32_t *pd_out) {
     if (ehdr->e_type    != ET_EXEC) return 0;
     if (ehdr->e_machine != EM_386)  return 0;
 
-    uint32_t pd_phys = vmm_create_user_pd();
+    uint32_t pd_phys  = vmm_create_user_pd();
+    uint32_t seg_end  = 0;   /* highest vaddr + memsz seen across all PT_LOAD */
 
     for (uint16_t i = 0; i < ehdr->e_phnum; i++) {
         uint32_t ph_off = ehdr->e_phoff + (uint32_t)i * ehdr->e_phentsize;
@@ -62,13 +64,20 @@ uint32_t elf_load(const void *data, uint32_t size, uint32_t *pd_out) {
             vmm_map_page_in(pd_phys, va, frame, flags);
         }
 
-        /* Copy file data into the mapped pages, walking the PD. */
+        /* Copy file data into the mapped pages. */
         for (uint32_t off = 0; off < phdr->p_filesz; off++) {
             uint8_t *dst = user_kaddr(pd_phys, phdr->p_vaddr + off);
             if (dst) *dst = bin[phdr->p_offset + off];
         }
+
+        /* Track the highest byte consumed by this segment. */
+        uint32_t end = phdr->p_vaddr + phdr->p_memsz;
+        if (end > seg_end) seg_end = end;
     }
 
-    *pd_out = pd_phys;
+    *pd_out  = pd_phys;
+    /* Round seg_end up to the next page boundary — this is where sbrk starts. */
+    *brk_out = (seg_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+
     return ehdr->e_entry;
 }

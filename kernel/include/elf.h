@@ -41,6 +41,9 @@ typedef struct {
  * directory.  Maps each PT_LOAD segment, copies file data, zeroes BSS.
  *
  * Returns the entry point virtual address on success, 0 on failure.
- * *pd_out receives the physical address of the new user page directory.
+ * *pd_out  receives the physical address of the new user page directory.
+ * *brk_out receives the initial heap break address (page-aligned end of
+ *          the highest PT_LOAD segment) — the starting point for sbrk().
  */
-uint32_t elf_load(const void *data, uint32_t size, uint32_t *pd_out);
+uint32_t elf_load(const void *data, uint32_t size,
+                  uint32_t *pd_out, uint32_t *brk_out);

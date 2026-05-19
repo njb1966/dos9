@@ -109,8 +109,9 @@ static void cmd_exec(const char *path) {
         return;
     }
 
-    uint32_t pd_phys = 0;
-    uint32_t entry   = elf_load(bin, size, &pd_phys);
+    uint32_t pd_phys  = 0;
+    uint32_t brk_start = 0;
+    uint32_t entry    = elf_load(bin, size, &pd_phys, &brk_start);
     kfree(bin);
 
     if (!entry) {
@@ -123,8 +124,12 @@ static void cmd_exec(const char *path) {
     /* Derive a short process name from the path's final component. */
     const char *name = path;
     for (const char *s = path; *s; s++) if (*s == '/') name = s + 1;
-    if (!process_create_user(entry, name, pd_phys))
+    process_t *p = process_create_user(entry, name, pd_phys);
+    if (!p) {
         terminal_write("exec: process table full\n");
+        return;
+    }
+    p->brk = brk_start;
 }
 
 static void cmd_rm(const char *path) {
