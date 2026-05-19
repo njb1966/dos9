@@ -58,6 +58,8 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     devfs_init();
     procfs_init();
     modfs_init();
+
+    process_init();         /* must be before vfs_open_stdio — fds live in process_t */
     vfs_open_stdio();
     terminal_write("[VFS] / /dev /proc /mod mounted\n");
 
@@ -67,7 +69,6 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     ata_init();
     if (ata_present()) diskfs_init();
 
-    process_init();
     process_create(spinner_task, "spinner");
     terminal_write("[PROC] scheduler active\n");
 
