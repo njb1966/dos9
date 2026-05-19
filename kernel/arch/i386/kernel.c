@@ -12,6 +12,7 @@
 #include <devfs.h>
 #include <procfs.h>
 #include <vfs.h>
+#include <syscall.h>
 #include <stdint.h>
 
 /* Spins a character in the top-right corner of the VGA screen.
@@ -53,6 +54,9 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     procfs_init();
     vfs_init();
     terminal_write("[VFS] mounted\n");
+
+    syscall_init();
+    terminal_write("[SYSCALL] int 0x80 gate active\n");
 
     process_init();
     process_create(spinner_task, "spinner");

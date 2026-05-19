@@ -108,6 +108,11 @@ process_t *process_create(void (*entry)(void), const char *name) {
     return p;
 }
 
+void process_exit(void) {
+    proc_table[cur]->state = PROC_DEAD;
+    for (;;) schedule();
+}
+
 int process_count(void) { return n_procs; }
 
 process_t *process_get(int idx) {

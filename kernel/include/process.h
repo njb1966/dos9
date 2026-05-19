@@ -29,5 +29,6 @@ typedef struct process {
 void       process_init(void);
 process_t *process_create(void (*entry)(void), const char *name);
 void       schedule(void);
+void       process_exit(void);
 int        process_count(void);
 process_t *process_get(int idx);
