@@ -337,9 +337,10 @@ This project does **not** need to:
   user libc (crt0 + stdio + string + stdlib + dos9.h), ATA PIO driver,
   DOS9FS disk filesystem (/disk), tools/mkdisk host tool.
 
-**Next: Phase 3 — The shell becomes the OS**
-Candidates in rough priority order:
-- Per-process fd tables (prerequisite for a clean multi-process shell)
-- `SYS_LSEEK` + additional syscalls (`getpid`, `brk` for user-space malloc)
-- A user-space shell program (ring-3, reads /disk for commands)
-- TUI toolkit foundations
+**Phase 3 in progress (2026-05-19):**
+- [x] Per-process fd tables — `file_t fds[MAX_FDS]` in `process_t`; user processes inherit fds 0-2 (stdin/stdout/stderr); `process_exit()` closes all fds; slot recycling handles `process_kill()` path
+- [x] `SYS_LSEEK` (#5) — `vfs_lseek()` with SEEK_SET/CUR/END; character devices return -1
+- [x] `SYS_GETPID` (#6) — `process_getpid()`
+- [ ] `SYS_BRK` — needed for user-space malloc; brk pointer in `process_t`, mapped via `vmm_map_page_in`
+- [ ] User-space shell program (ring-3, reads `/disk` for commands)
+- [ ] TUI toolkit foundations
