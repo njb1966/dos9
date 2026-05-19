@@ -9,6 +9,8 @@
 #include <kheap.h>
 #include <pit.h>
 #include <process.h>
+#include <devfs.h>
+#include <vfs.h>
 #include <stdint.h>
 
 /* Spins a character in the top-right corner of the VGA screen.
@@ -45,6 +47,10 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
 
     pit_init(100);
     terminal_write("[PIT] 100 Hz\n");
+
+    devfs_init();
+    vfs_init();
+    terminal_write("[VFS] mounted\n");
 
     process_init();
     process_create(spinner_task, "spinner");
