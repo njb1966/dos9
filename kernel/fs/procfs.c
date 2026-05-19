@@ -120,7 +120,7 @@ static fs_ops_t proc_root_ops = {
     .readdir = proc_root_readdir,
 };
 
-vnode_t procfs_root = {
+static vnode_t procfs_root = {
     .type = VTYPE_DIR, .size = 0, .priv = NULL, .ops = &proc_root_ops,
 };
 
@@ -136,4 +136,5 @@ void procfs_init(void) {
         pid_status_vnodes[i].priv = (void *)(uintptr_t)i;
         pid_status_vnodes[i].ops  = &status_ops;
     }
+    vfs_mount("/proc", &procfs_root);
 }

@@ -53,10 +53,11 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     pit_init(100);
     terminal_write("[PIT] 100 Hz\n");
 
+    vfs_init();
     devfs_init();
     procfs_init();
-    vfs_init();
-    terminal_write("[VFS] mounted\n");
+    vfs_open_stdio();
+    terminal_write("[VFS] / /dev /proc mounted\n");
 
     syscall_init();
     terminal_write("[SYSCALL] int 0x80 gate active\n");

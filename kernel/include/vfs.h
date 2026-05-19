@@ -34,8 +34,20 @@ typedef struct vnode {
     fs_ops_t  *ops;
 } vnode_t;
 
-/* Initialise VFS and pre-open stdin/stdout/stderr. */
+/* Initialise VFS: empty mount table, then mount the synthetic root at "/".
+   Must be called before any vfs_mount() or vfs_lookup(). */
 void vfs_init(void);
+
+/* Bind a filesystem's root vnode at an absolute path.
+   `path` must begin with '/', have no trailing slash (except "/" itself),
+   and remain valid for the lifetime of the mount.  `root` must outlive
+   the mount.  If a mount already exists at `path`, its root is replaced.
+   Returns 0 on success, -1 on error (bad args or table full). */
+int vfs_mount(const char *path, vnode_t *root);
+
+/* Pre-open stdin (fd 0 → /dev/kbd) and stdout/stderr (fds 1,2 → /dev/vga).
+   Call after devfs has mounted at /dev. */
+void vfs_open_stdio(void);
 
 /* Raw vnode lookup — returns NULL if path does not exist. */
 vnode_t *vfs_lookup(const char *path);

@@ -93,11 +93,10 @@ static fs_ops_t devfs_dir_ops = {
     .readdir = devfs_readdir,
 };
 
-/* Exported: vfs.c references this directly. */
-vnode_t devfs_root = {
+static vnode_t devfs_root = {
     .type = VTYPE_DIR, .size = 0, .priv = NULL, .ops = &devfs_dir_ops,
 };
 
 void devfs_init(void) {
-    /* All structures are statically initialised — nothing to do at runtime. */
+    vfs_mount("/dev", &devfs_root);
 }
