@@ -28,7 +28,10 @@ LIBC_C_OBJS := $(patsubst $(LIBC_DIR)/%.c, $(BUILD)/user/libc/%.o, $(LIBC_C_SRCS
 LIBC_CRT0   := $(BUILD)/user/libc/crt0.o
 LIBC_OBJS   := $(LIBC_CRT0) $(LIBC_C_OBJS)
 
-.PHONY: all clean run debug
+# Host tools (native gcc — not cross-compiled)
+MKDISK := tools/mkdisk
+
+.PHONY: all clean run debug disk
 
 all: $(KERNEL) $(USER_ELF)
 
@@ -63,6 +66,19 @@ $(BUILD)/%.o: %.S
 $(KERNEL): $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
 
+# ── Host tools ────────────────────────────────────────────────────────────
+
+$(MKDISK): tools/mkdisk.c
+	gcc -O2 -Wall -Wextra -o $@ $<
+
+# ── Disk image ────────────────────────────────────────────────────────────
+# Writes DOS9FS to disk.img with the user hello ELF as "hello".
+# Run once after initial 'dd' setup, then again whenever user programs change.
+
+disk: $(MKDISK) $(USER_ELF)
+	@[ -f disk.img ] || { echo "error: disk.img not found — run: dd if=/dev/zero of=disk.img bs=512 count=16384" >&2; exit 1; }
+	./$(MKDISK) disk.img hello=$(USER_ELF)
+
 run: $(KERNEL) $(USER_ELF)
 	./scripts/qemu.sh
 
@@ -71,3 +87,4 @@ debug: $(KERNEL) $(USER_ELF)
 
 clean:
 	rm -rf $(BUILD)
+	rm -f $(MKDISK)

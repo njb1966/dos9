@@ -14,6 +14,8 @@
 #include <modfs.h>
 #include <vfs.h>
 #include <syscall.h>
+#include <ata.h>
+#include <diskfs.h>
 #include <kernel.h>
 #include <stdint.h>
 
@@ -61,6 +63,9 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
 
     syscall_init();
     terminal_write("[SYSCALL] int 0x80 gate active\n");
+
+    ata_init();
+    if (ata_present()) diskfs_init();
 
     process_init();
     process_create(spinner_task, "spinner");

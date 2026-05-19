@@ -34,7 +34,7 @@ static void cmd_help(void) {
     terminal_write("  cat [path]      print file contents\n");
     terminal_write("  exec [path]     load ELF from path, run at ring 3\n");
     terminal_write("  rm [path]       unlink (rm /proc/<pid> kills pid)\n");
-    terminal_write("Paths:  /dev  /proc  /mod\n");
+    terminal_write("Paths:  /dev  /proc  /mod  /disk\n");
 }
 
 static void cmd_echo(const char *arg) {
@@ -123,7 +123,8 @@ static void cmd_exec(const char *path) {
     /* Derive a short process name from the path's final component. */
     const char *name = path;
     for (const char *s = path; *s; s++) if (*s == '/') name = s + 1;
-    process_create_user(entry, name, pd_phys);
+    if (!process_create_user(entry, name, pd_phys))
+        terminal_write("exec: process table full\n");
 }
 
 static void cmd_rm(const char *path) {
