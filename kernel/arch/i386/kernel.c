@@ -7,13 +7,19 @@
 #include <pmm.h>
 #include <vmm.h>
 #include <kheap.h>
+#include <pit.h>
+#include <process.h>
 #include <stdint.h>
 
-static volatile uint32_t timer_ticks = 0;
-
-static void timer_handler(struct registers *r) {
-    (void)r;
-    timer_ticks++;
+/* Spins a character in the top-right corner of the VGA screen.
+   Demonstrates preemptive scheduling — this runs concurrently with the shell. */
+static void spinner_task(void) {
+    volatile uint16_t *vga = (volatile uint16_t *)0xC00B8000;
+    const char spin[] = "|/-\\";
+    for (uint32_t i = 0;;i++) {
+        vga[79] = (uint16_t)(0x0F00 | (unsigned char)spin[i & 3]);
+        for (volatile uint32_t d = 0; d < 2000000; d++);
+    }
 }
 
 void kernel_main(uint32_t mb_magic, void *mb_info) {
@@ -28,7 +34,6 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     terminal_write("[IDT] loaded\n");
 
     pic_init();
-    irq_register(IRQ_TIMER, timer_handler);
     terminal_write("[PIC] remapped, IRQs active\n");
 
     keyboard_init();
@@ -37,6 +42,13 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     pmm_init(mb_magic, mb_info);
     vmm_init();
     kheap_init();
+
+    pit_init(100);
+    terminal_write("[PIT] 100 Hz\n");
+
+    process_init();
+    process_create(spinner_task, "spinner");
+    terminal_write("[PROC] scheduler active\n");
 
     shell_run();
 }
