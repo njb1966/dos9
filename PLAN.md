@@ -341,6 +341,7 @@ This project does **not** need to:
 - [x] Per-process fd tables — `file_t fds[MAX_FDS]` in `process_t`; user processes inherit fds 0-2 (stdin/stdout/stderr); `process_exit()` closes all fds; slot recycling handles `process_kill()` path
 - [x] `SYS_LSEEK` (#5) — `vfs_lseek()` with SEEK_SET/CUR/END; character devices return -1
 - [x] `SYS_GETPID` (#6) — `process_getpid()`
-- [ ] `SYS_BRK` — needed for user-space malloc; brk pointer in `process_t`, mapped via `vmm_map_page_in`
+- [x] `SYS_BRK` (#7) — `sbrk()` semantics; `brk` field in `process_t`, set by `elf_load()` brk_out; pages mapped on demand via `vmm_map_page_in`; ceiling 0xBF000000
+- [x] User libc: `malloc/free/calloc/realloc` — free-list allocator in `user/libc/malloc.c`, 16-byte headers, 8-byte aligned payloads, first-fit with coalescing
 - [ ] User-space shell program (ring-3, reads `/disk` for commands)
 - [ ] TUI toolkit foundations
