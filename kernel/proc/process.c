@@ -1,4 +1,5 @@
 #include <process.h>
+#include <vfs.h>
 #include <pic.h>
 #include <kheap.h>
 #include <gdt.h>
@@ -80,6 +81,7 @@ void process_init(void) {
     name_copy(p->name, "init");
     p->entry    = NULL;
     p->stack    = NULL;         /* boot stack — not heap-allocated */
+    memset(p->fds, 0, sizeof(p->fds));
 
     proc_table[0] = p;
     n_procs       = 1;
@@ -95,6 +97,7 @@ static int proc_alloc_slot(void) {
     for (int i = 0; i < n_procs; i++) {
         process_t *old = proc_table[i];
         if (old && old->state == PROC_DEAD) {
+            vfs_close_table(old->fds);   /* handles kill path that skips process_exit */
             if (old->stack) kfree(old->stack);
             kfree(old);
             proc_table[i] = NULL;
@@ -138,12 +141,14 @@ process_t *process_create(void (*entry)(void), const char *name) {
     name_copy(p->name, name);
     p->entry    = entry;
     p->stack    = stk;
+    memset(p->fds, 0, sizeof(p->fds));
 
     proc_table[slot] = p;
     return p;
 }
 
 void process_exit(void) {
+    vfs_close_table(proc_table[cur]->fds);
     proc_table[cur]->state = PROC_DEAD;
     for (;;) schedule();
 }
@@ -228,7 +233,17 @@ process_t *process_create_user(uint32_t entry_vaddr, const char *name,
     p->entry      = (void (*)(void))(uintptr_t)entry_vaddr;
     p->stack      = stk;
     p->user_stack = USER_STACK_TOP;
+    memset(p->fds, 0, sizeof(p->fds));
+    vfs_inherit_stdio(proc_table[cur]->fds, p->fds);
 
     proc_table[slot] = p;
     return p;
+}
+
+uint32_t process_getpid(void) {
+    return proc_table[cur]->pid;
+}
+
+file_t *process_current_fds(void) {
+    return proc_table[cur]->fds;
 }

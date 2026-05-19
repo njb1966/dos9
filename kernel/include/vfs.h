@@ -25,9 +25,8 @@ typedef struct fs_ops {
     struct vnode * (*lookup)(struct vnode *dir, const char *name);
     int            (*readdir)(struct vnode *dir, uint32_t idx,
                               char *name_out, uint32_t nmax);
-    /* Remove a name from a directory.  For synthetic FSes the action may
-       have side effects beyond filesystem state — e.g. /proc unlink kills
-       the process.  Return 0 on success, -1 on error. */
+    /* Remove a name from a directory.  Synthetic FSes may use this for
+       side effects (e.g. /proc unlink kills the process). */
     int            (*unlink)(struct vnode *dir, const char *name);
 } fs_ops_t;
 
@@ -38,18 +37,31 @@ typedef struct vnode {
     fs_ops_t  *ops;
 } vnode_t;
 
-/* Initialise VFS: empty mount table, then mount the synthetic root at "/".
-   Must be called before any vfs_mount() or vfs_lookup(). */
+/* ── Per-process file descriptor table ─────────────────────────────────── */
+
+#define MAX_FDS 16
+
+typedef struct {
+    vnode_t *vnode;
+    uint32_t offset;
+    int      flags;
+    int      open;
+} file_t;
+
+/* lseek whence constants */
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
+/* ── VFS API ────────────────────────────────────────────────────────────── */
+
+/* Initialise VFS: empty mount table, synthetic root at "/". */
 void vfs_init(void);
 
-/* Bind a filesystem's root vnode at an absolute path.
-   `path` must begin with '/', have no trailing slash (except "/" itself),
-   and remain valid for the lifetime of the mount.  `root` must outlive
-   the mount.  If a mount already exists at `path`, its root is replaced.
-   Returns 0 on success, -1 on error (bad args or table full). */
+/* Bind a filesystem's root vnode at an absolute path. */
 int vfs_mount(const char *path, vnode_t *root);
 
-/* Pre-open stdin (fd 0 → /dev/kbd) and stdout/stderr (fds 1,2 → /dev/vga).
+/* Pre-open stdin/stdout/stderr in the current process's fd table.
    Call after devfs has mounted at /dev. */
 void vfs_open_stdio(void);
 
@@ -61,8 +73,12 @@ int vfs_open(const char *path, int flags);
 int vfs_read(int fd, void *buf, uint32_t len);
 int vfs_write(int fd, const void *buf, uint32_t len);
 int vfs_close(int fd);
+int vfs_lseek(int fd, int32_t offset, int whence);
 int vfs_readdir(int fd, uint32_t idx, char *name_out, uint32_t nmax);
 
-/* Remove a name from its parent directory.  Returns 0 on success, -1 on
-   error or if the parent's filesystem doesn't implement unlink. */
+/* Remove a name from its parent directory. */
 int vfs_unlink(const char *path);
+
+/* Per-process fd table helpers — called by process.c. */
+void vfs_close_table(file_t *table);
+void vfs_inherit_stdio(const file_t *src, file_t *dst);

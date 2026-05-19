@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <vfs.h>    /* for file_t, MAX_FDS */
 
 #define MAX_PROCS     8
 
@@ -25,6 +26,7 @@ typedef struct process {
     void      (*entry)(void);   /* offset 32 — kernel fn or user EIP (cast) */
     uint8_t    *stack;          /* offset 36 — kernel stack base (NULL for pid 0) */
     uint32_t    user_stack;     /* offset 40 — user-space ESP for ring-3 iret */
+    file_t      fds[MAX_FDS];   /* per-process file descriptor table */
 } process_t;
 
 void       process_init(void);
@@ -35,8 +37,6 @@ void       schedule(void);
 void       process_exit(void);
 int        process_count(void);
 process_t *process_get(int idx);
-
-/* Mark the process with the given pid as dead.  The scheduler skips dead
-   processes on its next pass.  Refuses to kill pid 0 (init).  Returns 0 on
-   success, -1 if no such pid or if pid is 0. */
 int        process_kill(uint32_t pid);
+uint32_t   process_getpid(void);
+file_t    *process_current_fds(void);

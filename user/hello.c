@@ -1,10 +1,9 @@
 #include <dos9.h>
 
 int main(void) {
-    puts("Hello from user space! (C libc)");
+    puts("Hello from user space!");
+    printf("  pid:     %d\n", getpid());
     printf("  arch:    i386, ring 3\n");
-    printf("  write:   SYS_WRITE = %d\n", SYS_WRITE);
-    printf("  exit:    SYS_EXIT  = %d\n", SYS_EXIT);
-    printf("  libc:    dos9.h, crt0.S, stdio/string/stdlib\n");
+    printf("  syscalls: exit/read/write/open/close/lseek/getpid\n");
     return 0;
 }

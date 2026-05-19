@@ -9,6 +9,8 @@
 #define SYS_WRITE  2
 #define SYS_OPEN   3
 #define SYS_CLOSE  4
+#define SYS_LSEEK  5
+#define SYS_GETPID 6
 
 /* ── File descriptor constants ────────────────────────────────────────── */
 #define STDIN_FILENO  0
@@ -19,6 +21,11 @@
 #define O_RDONLY 0
 #define O_WRONLY 1
 #define O_RDWR   2
+
+/* ── lseek whence ─────────────────────────────────────────────────────── */
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
 
 /* ── Raw syscall (eax=number, ebx/ecx/edx=args, return in eax) ────────── */
 static inline int32_t _syscall3(int32_t n, int32_t a, int32_t b, int32_t c) {
@@ -54,6 +61,14 @@ static inline int open(const char *path, int flags) {
 
 static inline int close(int fd) {
     return (int)_syscall1(SYS_CLOSE, (int32_t)fd);
+}
+
+static inline int lseek(int fd, int32_t offset, int whence) {
+    return (int)_syscall3(SYS_LSEEK, (int32_t)fd, offset, (int32_t)whence);
+}
+
+static inline int getpid(void) {
+    return (int)_syscall3(SYS_GETPID, 0, 0, 0);
 }
 
 /* ── stdio ──────────────────────────────────────────────────────────────── */

@@ -30,6 +30,14 @@ static int32_t sys_close(int32_t fd) {
     return vfs_close(fd);
 }
 
+static int32_t sys_lseek(int32_t fd, int32_t offset, int32_t whence) {
+    return vfs_lseek(fd, offset, (int)whence);
+}
+
+static int32_t sys_getpid(void) {
+    return (int32_t)process_getpid();
+}
+
 /* ── dispatcher ──────────────────────────────────────────────────────── */
 
 /* Called from syscall_common in isr.S.  Writes return value to r->eax
@@ -37,11 +45,14 @@ static int32_t sys_close(int32_t fd) {
 void syscall_handler(struct registers *r) {
     int32_t ret = -1;
     switch ((int32_t)r->eax) {
-    case SYS_EXIT:  sys_exit((int32_t)r->ebx);                                 return;
-    case SYS_READ:  ret = sys_read ((int32_t)r->ebx, (void *)r->ecx, r->edx); break;
-    case SYS_WRITE: ret = sys_write((int32_t)r->ebx, (void *)r->ecx, r->edx); break;
-    case SYS_OPEN:  ret = sys_open ((const char *)r->ebx, (int32_t)r->ecx);   break;
-    case SYS_CLOSE: ret = sys_close((int32_t)r->ebx);                          break;
+    case SYS_EXIT:   sys_exit((int32_t)r->ebx);                                        return;
+    case SYS_READ:   ret = sys_read  ((int32_t)r->ebx, (void *)r->ecx, r->edx);       break;
+    case SYS_WRITE:  ret = sys_write ((int32_t)r->ebx, (void *)r->ecx, r->edx);       break;
+    case SYS_OPEN:   ret = sys_open  ((const char *)r->ebx, (int32_t)r->ecx);         break;
+    case SYS_CLOSE:  ret = sys_close ((int32_t)r->ebx);                               break;
+    case SYS_LSEEK:  ret = sys_lseek ((int32_t)r->ebx, (int32_t)r->ecx,
+                                      (int32_t)r->edx);                               break;
+    case SYS_GETPID: ret = sys_getpid();                                               break;
     }
     r->eax = (uint32_t)ret;
 }

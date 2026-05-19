@@ -1,4 +1,5 @@
 #include <vfs.h>
+#include <process.h>
 #include <string.h>
 #include <stddef.h>
 
@@ -147,26 +148,16 @@ int vfs_mount(const char *path, vnode_t *root) {
     return 0;
 }
 
-/* ── file descriptor table ───────────────────────────────────────────── */
+/* ── fd table helpers ─────────────────────────────────────────────────── */
 
-#define MAX_FDS 16
-
-typedef struct {
-    vnode_t *vnode;
-    uint32_t offset;
-    int      flags;
-    int      open;
-} file_t;
-
-static file_t fds[MAX_FDS];
-
-static int fd_alloc(vnode_t *v, int flags) {
+/* Allocate a free fd in `table` for vnode `v`.  Returns fd index or -1. */
+static int fd_alloc(file_t *table, vnode_t *v, int flags) {
     for (int i = 0; i < MAX_FDS; i++) {
-        if (!fds[i].open) {
-            fds[i].vnode  = v;
-            fds[i].offset = 0;
-            fds[i].flags  = flags;
-            fds[i].open   = 1;
+        if (!table[i].open) {
+            table[i].vnode  = v;
+            table[i].offset = 0;
+            table[i].flags  = flags;
+            table[i].open   = 1;
             return i;
         }
     }
@@ -177,16 +168,17 @@ static int fd_alloc(vnode_t *v, int flags) {
 
 void vfs_init(void) {
     for (int i = 0; i < MAX_MOUNTS; i++) mounts[i].used = 0;
-    for (int i = 0; i < MAX_FDS; i++)    fds[i].open    = 0;
     vfs_mount("/", &root_vnode);
+    /* per-process fd tables are zeroed in process_init/process_create */
 }
 
 void vfs_open_stdio(void) {
-    vnode_t *kbd = vfs_lookup("/dev/kbd");
-    vnode_t *vga = vfs_lookup("/dev/vga");
-    if (kbd) fd_alloc(kbd, O_RDONLY);   /* fd 0 */
-    if (vga) fd_alloc(vga, O_WRONLY);   /* fd 1 */
-    if (vga) fd_alloc(vga, O_WRONLY);   /* fd 2 */
+    file_t  *table = process_current_fds();
+    vnode_t *kbd   = vfs_lookup("/dev/kbd");
+    vnode_t *vga   = vfs_lookup("/dev/vga");
+    if (kbd) fd_alloc(table, kbd, O_RDONLY);   /* fd 0 — stdin  */
+    if (vga) fd_alloc(table, vga, O_WRONLY);   /* fd 1 — stdout */
+    if (vga) fd_alloc(table, vga, O_WRONLY);   /* fd 2 — stderr */
 }
 
 int vfs_open(const char *path, int flags) {
@@ -197,12 +189,13 @@ int vfs_open(const char *path, int flags) {
         int r = v->ops->open(v, flags);
         if (r < 0) return -1;
     }
-    return fd_alloc(v, flags);
+    return fd_alloc(process_current_fds(), v, flags);
 }
 
 int vfs_read(int fd, void *buf, uint32_t len) {
-    if (fd < 0 || fd >= MAX_FDS || !fds[fd].open) return -1;
-    file_t  *f = &fds[fd];
+    if (fd < 0 || fd >= MAX_FDS) return -1;
+    file_t  *f   = &process_current_fds()[fd];
+    if (!f->open) return -1;
     fs_ops_t *ops = f->vnode->ops;
     if (!ops || !ops->read) return -1;
     int n = ops->read(f->vnode, buf, f->offset, len);
@@ -211,8 +204,9 @@ int vfs_read(int fd, void *buf, uint32_t len) {
 }
 
 int vfs_write(int fd, const void *buf, uint32_t len) {
-    if (fd < 0 || fd >= MAX_FDS || !fds[fd].open) return -1;
-    file_t  *f = &fds[fd];
+    if (fd < 0 || fd >= MAX_FDS) return -1;
+    file_t  *f   = &process_current_fds()[fd];
+    if (!f->open) return -1;
     fs_ops_t *ops = f->vnode->ops;
     if (!ops || !ops->write) return -1;
     int n = ops->write(f->vnode, buf, f->offset, len);
@@ -221,17 +215,37 @@ int vfs_write(int fd, const void *buf, uint32_t len) {
 }
 
 int vfs_close(int fd) {
-    if (fd < 0 || fd >= MAX_FDS || !fds[fd].open) return -1;
-    file_t *f = &fds[fd];
+    if (fd < 0 || fd >= MAX_FDS) return -1;
+    file_t *f = &process_current_fds()[fd];
+    if (!f->open) return -1;
     if (f->vnode->ops && f->vnode->ops->close)
         f->vnode->ops->close(f->vnode);
     f->open = 0;
     return 0;
 }
 
+int vfs_lseek(int fd, int32_t offset, int whence) {
+    if (fd < 0 || fd >= MAX_FDS) return -1;
+    file_t *f = &process_current_fds()[fd];
+    if (!f->open) return -1;
+    if (f->vnode->type == VTYPE_CHR) return -1;    /* character devices not seekable */
+
+    int32_t new_off;
+    switch (whence) {
+    case SEEK_SET: new_off = offset;                                 break;
+    case SEEK_CUR: new_off = (int32_t)f->offset + offset;           break;
+    case SEEK_END: new_off = (int32_t)f->vnode->size + offset;      break;
+    default: return -1;
+    }
+    if (new_off < 0) return -1;
+    f->offset = (uint32_t)new_off;
+    return new_off;
+}
+
 int vfs_readdir(int fd, uint32_t idx, char *name_out, uint32_t nmax) {
-    if (fd < 0 || fd >= MAX_FDS || !fds[fd].open) return -1;
-    file_t  *f = &fds[fd];
+    if (fd < 0 || fd >= MAX_FDS) return -1;
+    file_t  *f   = &process_current_fds()[fd];
+    if (!f->open) return -1;
     fs_ops_t *ops = f->vnode->ops;
     if (!ops || !ops->readdir) return -1;
     return ops->readdir(f->vnode, idx, name_out, nmax);
@@ -258,4 +272,19 @@ int vfs_unlink(const char *path) {
     vnode_t *dir = vfs_lookup(parent);
     if (!dir || !dir->ops || !dir->ops->unlink) return -1;
     return dir->ops->unlink(dir, last_slash + 1);
+}
+
+void vfs_close_table(file_t *table) {
+    for (int i = 0; i < MAX_FDS; i++) {
+        if (!table[i].open) continue;
+        if (table[i].vnode && table[i].vnode->ops && table[i].vnode->ops->close)
+            table[i].vnode->ops->close(table[i].vnode);
+        table[i].open = 0;
+    }
+}
+
+void vfs_inherit_stdio(const file_t *src, file_t *dst) {
+    /* Copy only fds 0-2 (stdin, stdout, stderr). */
+    for (int i = 0; i < 3; i++)
+        dst[i] = src[i];
 }
