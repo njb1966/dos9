@@ -1,4 +1,5 @@
 build/
 disk.img
+tools/mkdisk
 *.o
 *.elf
