@@ -67,14 +67,11 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     terminal_write("[PROC] scheduler active\n");
 
     /* If a Multiboot module was passed (via -initrd), load it as a user ELF.
-       mb_info is a physical address; use VIRT() now that the identity map
-       has been replaced by the kernel linear map set up by vmm_init(). */
-    struct multiboot_info *mbi =
-        (struct multiboot_info *)VIRT((uint32_t)mb_info);
-    if (mb_magic == MULTIBOOT_MAGIC &&
-        (mbi->flags & MULTIBOOT_FLAG_MODS) && mbi->mods_count > 0) {
-        struct multiboot_mod *mod =
-            (struct multiboot_mod *)VIRT(mbi->mods_addr);
+       Use the pmm-saved snapshot rather than re-reading mbi; the original
+       mods array may live inside the PMM bitmap region. */
+    (void)mb_info;
+    if (mb_magic == MULTIBOOT_MAGIC && pmm_mod_count() > 0) {
+        struct multiboot_mod *mod = pmm_mod(0);
         const void *elf_data = (const void *)VIRT(mod->mod_start);
         uint32_t    elf_size = mod->mod_end - mod->mod_start;
         uint32_t    pd_phys  = 0;

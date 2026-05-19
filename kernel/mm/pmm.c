@@ -14,6 +14,17 @@ static uint32_t *bitmap;
 static uint32_t  total_frames;
 static uint32_t  free_count;
 
+/* Snapshot of multiboot mods array.  Captured before the bitmap is written
+   so it survives even when the loader places mods at _kernel_end. */
+#define MAX_SAVED_MODS 8
+static struct multiboot_mod saved_mods[MAX_SAVED_MODS];
+static uint32_t              saved_mods_count;
+
+uint32_t pmm_mod_count(void) { return saved_mods_count; }
+struct multiboot_mod *pmm_mod(uint32_t i) {
+    return (i < saved_mods_count) ? &saved_mods[i] : NULL;
+}
+
 /* ── bitmap helpers ──────────────────────────────────────────────── */
 
 static inline void frame_set(uint32_t f) {
@@ -70,9 +81,35 @@ void pmm_init(uint32_t magic, void *mbi_ptr) {
     total_frames = (mem_kb * 1024) / PAGE_SIZE;
     free_count   = 0;
 
-    /* Bitmap lives immediately after the kernel image (_kernel_end is
-       page-aligned by the linker script so no rounding needed here). */
-    bitmap = (uint32_t *)_kernel_end;
+    /* Snapshot multiboot mods BEFORE we touch the bitmap.  The loader often
+       places the mods array exactly at _kernel_end (the bitmap's address),
+       so reading it after the bitmap fill would return 0xFFFFFFFF garbage. */
+    saved_mods_count = 0;
+    if ((mbi->flags & MULTIBOOT_FLAG_MODS) && mbi->mods_count > 0) {
+        struct multiboot_mod *src =
+            (struct multiboot_mod *)(uintptr_t)(mbi->mods_addr);
+        uint32_t n = mbi->mods_count;
+        if (n > MAX_SAVED_MODS) n = MAX_SAVED_MODS;
+        for (uint32_t i = 0; i < n; i++) saved_mods[i] = src[i];
+        saved_mods_count = n;
+    }
+
+    /* Place the bitmap past _kernel_end AND past any multiboot artifacts
+       (mods array + every module's data).  Otherwise the bitmap fill below
+       clobbers them — the loader typically puts the mods array and the
+       module data immediately after the kernel image. */
+    uint32_t kend_phys = PHYS((uint32_t)_kernel_end);
+    uint32_t bm_phys   = kend_phys;
+    if ((mbi->flags & MULTIBOOT_FLAG_MODS) && mbi->mods_count > 0) {
+        uint32_t mods_end = mbi->mods_addr +
+                            mbi->mods_count * sizeof(struct multiboot_mod);
+        if (mods_end > bm_phys) bm_phys = mods_end;
+        for (uint32_t i = 0; i < saved_mods_count; i++)
+            if (saved_mods[i].mod_end > bm_phys) bm_phys = saved_mods[i].mod_end;
+    }
+    bm_phys = (bm_phys + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);    /* page-align */
+
+    bitmap = (uint32_t *)VIRT(bm_phys);
     uint32_t bitmap_words = (total_frames + BITS_PER_WORD - 1) / BITS_PER_WORD;
 
     /* 1. Mark everything used. */
@@ -104,19 +141,20 @@ void pmm_init(uint32_t magic, void *mbi_ptr) {
         mark_free(0x100000, mbi->mem_upper * 1024);
     }
 
-    /* 3. Re-mark the kernel + bitmap region used.
-          _kernel_end is a virtual address; convert to physical for PMM. */
-    uint32_t phys_kernel_end = PHYS((uint32_t)_kernel_end);
-    uint32_t protected_end   = phys_kernel_end + bitmap_words * sizeof(uint32_t);
-    mark_used(0, protected_end);
+    /* 3. Re-mark the kernel image used. */
+    mark_used(0, kend_phys);
 
-    /* 4. Mark Multiboot module(s) used so vmm_init can't overwrite them.
-          mbi is a physical pointer — identity map is still active here. */
-    if ((mbi->flags & MULTIBOOT_FLAG_MODS) && mbi->mods_count > 0) {
-        struct multiboot_mod *mods =
-            (struct multiboot_mod *)(uintptr_t)(mbi->mods_addr);
-        for (uint32_t i = 0; i < mbi->mods_count; i++)
-            mark_used(mods[i].mod_start, mods[i].mod_end - mods[i].mod_start);
+    /* 4. Re-mark the bitmap itself used. */
+    mark_used(bm_phys, bitmap_words * sizeof(uint32_t));
+
+    /* 5. Mark multiboot mods array + every module's data used (from snapshot,
+          since the originals may already be inside the bitmap region). */
+    if (saved_mods_count > 0) {
+        mark_used(mbi->mods_addr,
+                  mbi->mods_count * sizeof(struct multiboot_mod));
+        for (uint32_t i = 0; i < saved_mods_count; i++)
+            mark_used(saved_mods[i].mod_start,
+                      saved_mods[i].mod_end - saved_mods[i].mod_start);
     }
 
     /* Report. */
