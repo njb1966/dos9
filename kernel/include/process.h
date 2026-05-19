@@ -16,18 +16,21 @@
  *   offset 4: page_dir (physical CR3 value)
  */
 typedef struct process {
-    uint32_t    esp;            /* offset  0 */
-    uint32_t    page_dir;       /* offset  4 */
+    uint32_t    esp;            /* offset  0 — saved kernel stack pointer */
+    uint32_t    page_dir;       /* offset  4 — physical CR3 */
     uint32_t    pid;            /* offset  8 */
     uint8_t     state;          /* offset 12 */
     uint8_t     _pad[3];        /* offset 13 */
     char        name[16];       /* offset 16 */
-    void      (*entry)(void);   /* offset 32 */
-    uint8_t    *stack;          /* offset 36 */
+    void      (*entry)(void);   /* offset 32 — kernel fn or user EIP (cast) */
+    uint8_t    *stack;          /* offset 36 — kernel stack base (NULL for pid 0) */
+    uint32_t    user_stack;     /* offset 40 — user-space ESP for ring-3 iret */
 } process_t;
 
 void       process_init(void);
 process_t *process_create(void (*entry)(void), const char *name);
+process_t *process_create_user(uint32_t entry_vaddr, const char *name,
+                                uint32_t pd_phys);
 void       schedule(void);
 void       process_exit(void);
 int        process_count(void);

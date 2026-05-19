@@ -110,6 +110,15 @@ void pmm_init(uint32_t magic, void *mbi_ptr) {
     uint32_t protected_end   = phys_kernel_end + bitmap_words * sizeof(uint32_t);
     mark_used(0, protected_end);
 
+    /* 4. Mark Multiboot module(s) used so vmm_init can't overwrite them.
+          mbi is a physical pointer — identity map is still active here. */
+    if ((mbi->flags & MULTIBOOT_FLAG_MODS) && mbi->mods_count > 0) {
+        struct multiboot_mod *mods =
+            (struct multiboot_mod *)(uintptr_t)(mbi->mods_addr);
+        for (uint32_t i = 0; i < mbi->mods_count; i++)
+            mark_used(mods[i].mod_start, mods[i].mod_end - mods[i].mod_start);
+    }
+
     /* Report. */
     uint32_t free_mb  = (free_count  * 4) / 1024;
     uint32_t total_mb = (total_frames * 4) / 1024;

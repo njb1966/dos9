@@ -1,14 +1,23 @@
 #include <process.h>
 #include <pic.h>
 #include <kheap.h>
+#include <gdt.h>
+#include <vmm.h>
+#include <pmm.h>
+#include <kernel.h>
+#include <string.h>
 #include <stdint.h>
 #include <stddef.h>
 
-#define KSTACK_SIZE 8192u   /* 8KB kernel stack per process */
-#define TIMESLICE   5u      /* timer ticks per scheduling quantum */
+#define KSTACK_SIZE      8192u       /* 8KB kernel stack per process */
+#define TIMESLICE        5u          /* timer ticks per scheduling quantum */
+#define USER_STACK_TOP   0xBFFF0000u /* user-space stack pointer (grows down) */
+#define USER_STACK_PAGES 4u          /* 16KB user stack (4 × 4KB pages) */
+#define PAGE_SIZE        4096u
 
 /* Defined in switch.S */
 extern void context_switch(process_t *prev, process_t *next);
+extern void enter_userspace(uint32_t user_eip, uint32_t user_esp);
 
 static process_t *proc_table[MAX_PROCS];
 static int        n_procs     = 0;
@@ -44,6 +53,14 @@ static void proc_trampoline(void) {
 
     self->state = PROC_DEAD;
     for (;;) schedule();        /* yield forever if entry returns */
+}
+
+/* Entry trampoline for user-space processes.
+   Runs in kernel mode; sets TSS kernel stack, then iret to ring 3. */
+static void user_trampoline(void) {
+    process_t *self = proc_table[cur];
+    gdt_set_kernel_stack((uint32_t)(self->stack + KSTACK_SIZE));
+    enter_userspace((uint32_t)(uintptr_t)self->entry, self->user_stack);
 }
 
 static void timer_tick(struct registers *r) {
@@ -138,5 +155,46 @@ void schedule(void) {
     prev->state = PROC_READY;
     nxt->state  = PROC_RUNNING;
     cur         = next;
+    /* Keep TSS.esp0 pointing at the new process's kernel stack top so that
+       interrupts and syscalls from ring 3 switch to the right kernel stack. */
+    if (nxt->stack)
+        gdt_set_kernel_stack((uint32_t)(nxt->stack + KSTACK_SIZE));
     context_switch(prev, nxt);
+}
+
+process_t *process_create_user(uint32_t entry_vaddr, const char *name,
+                                uint32_t pd_phys) {
+    if (n_procs >= MAX_PROCS) return NULL;
+
+    process_t *p   = kmalloc(sizeof(process_t));
+    uint8_t   *stk = kmalloc(KSTACK_SIZE);
+
+    /* Allocate and map user-space stack pages in the user page directory. */
+    for (uint32_t i = 0; i < USER_STACK_PAGES; i++) {
+        uint32_t vaddr = USER_STACK_TOP - (USER_STACK_PAGES - i) * PAGE_SIZE;
+        uint32_t frame = (uint32_t)pmm_alloc_frame();
+        memset((void *)VIRT(frame), 0, PAGE_SIZE);
+        vmm_map_page_in(pd_phys, vaddr, frame,
+                        PF_PRESENT | PF_WRITE | PF_USER);
+    }
+
+    /* Build kernel stack fake frame: ret → user_trampoline. */
+    uint32_t *top = (uint32_t *)(stk + KSTACK_SIZE);
+    *--top = (uint32_t)user_trampoline;
+    *--top = 0;  /* EBP */
+    *--top = 0;  /* EDI */
+    *--top = 0;  /* ESI */
+    *--top = 0;  /* EBX */
+
+    p->esp        = (uint32_t)top;
+    p->page_dir   = pd_phys;
+    p->pid        = next_pid++;
+    p->state      = PROC_READY;
+    name_copy(p->name, name);
+    p->entry      = (void (*)(void))(uintptr_t)entry_vaddr;
+    p->stack      = stk;
+    p->user_stack = USER_STACK_TOP;
+
+    proc_table[n_procs++] = p;
+    return p;
 }

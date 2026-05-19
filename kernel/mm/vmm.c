@@ -7,6 +7,9 @@
 #define PAGE_SIZE   4096u
 #define PD_ENTRIES  1024u
 #define PT_ENTRIES  1024u
+#define KERNEL_PD_IDX 768u   /* first PD entry covering 0xC0000000 */
+
+static uint32_t kernel_pd_phys = 0;
 
 /*
  * Build a proper 4KB page directory and switch to it.
@@ -51,9 +54,50 @@ void vmm_init(void) {
     /* Load CR3 with the new page directory's physical address.
        Writing CR3 flushes the entire TLB. Execution continues at
        0xC010xxxx which is now backed by our new 4KB page tables. */
+    kernel_pd_phys = pd_phys;
     __asm__ volatile("mov %0, %%cr3" :: "r"(pd_phys) : "memory");
 
     terminal_write("[VMM] 4KB paging active\n");
+}
+
+uint32_t vmm_get_kernel_pd(void) { return kernel_pd_phys; }
+
+void vmm_map_page_in(uint32_t pd_phys, uint32_t vaddr,
+                     uint32_t paddr, uint32_t flags) {
+    uint32_t *pd    = (uint32_t *)VIRT(pd_phys);
+    uint32_t pd_idx = vaddr >> 22;
+    uint32_t pt_idx = (vaddr >> 12) & 0x3FFu;
+
+    if (!(pd[pd_idx] & PF_PRESENT)) {
+        uint32_t pt_phys = (uint32_t)pmm_alloc_frame();
+        uint32_t *pt     = (uint32_t *)VIRT(pt_phys);
+        for (uint32_t i = 0; i < PT_ENTRIES; i++) pt[i] = 0;
+        /* Propagate PF_USER to the PD entry so user-mode can access the PT. */
+        pd[pd_idx] = pt_phys | PF_PRESENT | PF_WRITE | (flags & PF_USER);
+    }
+
+    uint32_t pt_phys = pd[pd_idx] & ~0xFFFu;
+    uint32_t *pt     = (uint32_t *)VIRT(pt_phys);
+    pt[pt_idx]       = (paddr & ~0xFFFu) | flags;
+
+    /* Only flush TLB entry if this PD is currently loaded. */
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (cr3 == pd_phys)
+        __asm__ volatile("invlpg (%0)" :: "r"(vaddr) : "memory");
+}
+
+uint32_t vmm_create_user_pd(void) {
+    uint32_t pd_phys   = (uint32_t)pmm_alloc_frame();
+    uint32_t *pd       = (uint32_t *)VIRT(pd_phys);
+    uint32_t *kpd      = (uint32_t *)VIRT(kernel_pd_phys);
+
+    /* User half: empty. */
+    for (uint32_t i = 0; i < KERNEL_PD_IDX; i++) pd[i] = 0;
+    /* Kernel half: share the kernel page tables (read-only from user mode). */
+    for (uint32_t i = KERNEL_PD_IDX; i < PD_ENTRIES; i++) pd[i] = kpd[i];
+
+    return pd_phys;
 }
 
 /*
@@ -67,21 +111,5 @@ void vmm_init(void) {
 void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
     uint32_t pd_phys;
     __asm__ volatile("mov %%cr3, %0" : "=r"(pd_phys));
-    uint32_t *pd = (uint32_t *)VIRT(pd_phys);
-
-    uint32_t pd_idx = vaddr >> 22;
-    uint32_t pt_idx = (vaddr >> 12) & 0x3FFu;
-
-    if (!(pd[pd_idx] & PF_PRESENT)) {
-        uint32_t pt_phys = (uint32_t)pmm_alloc_frame();
-        uint32_t *pt = (uint32_t *)VIRT(pt_phys);
-        for (uint32_t i = 0; i < PT_ENTRIES; i++) pt[i] = 0;
-        pd[pd_idx] = pt_phys | PF_PRESENT | PF_WRITE;
-    }
-
-    uint32_t pt_phys = pd[pd_idx] & ~0xFFFu;
-    uint32_t *pt = (uint32_t *)VIRT(pt_phys);
-    pt[pt_idx] = (paddr & ~0xFFFu) | flags;
-
-    __asm__ volatile("invlpg (%0)" :: "r"(vaddr) : "memory");
+    vmm_map_page_in(pd_phys, vaddr, paddr, flags);
 }

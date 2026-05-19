@@ -13,6 +13,9 @@
 #include <procfs.h>
 #include <vfs.h>
 #include <syscall.h>
+#include <elf.h>
+#include <multiboot.h>
+#include <kernel.h>
 #include <stdint.h>
 
 /* Spins a character in the top-right corner of the VGA screen.
@@ -61,6 +64,27 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     process_init();
     process_create(spinner_task, "spinner");
     terminal_write("[PROC] scheduler active\n");
+
+    /* If a Multiboot module was passed (via -initrd), load it as a user ELF.
+       mb_info is a physical address; use VIRT() now that the identity map
+       has been replaced by the kernel linear map set up by vmm_init(). */
+    struct multiboot_info *mbi =
+        (struct multiboot_info *)VIRT((uint32_t)mb_info);
+    if (mb_magic == MULTIBOOT_MAGIC &&
+        (mbi->flags & MULTIBOOT_FLAG_MODS) && mbi->mods_count > 0) {
+        struct multiboot_mod *mod =
+            (struct multiboot_mod *)VIRT(mbi->mods_addr);
+        const void *elf_data = (const void *)VIRT(mod->mod_start);
+        uint32_t    elf_size = mod->mod_end - mod->mod_start;
+        uint32_t    pd_phys  = 0;
+        uint32_t    entry    = elf_load(elf_data, elf_size, &pd_phys);
+        if (entry) {
+            process_create_user(entry, "init", pd_phys);
+            terminal_write("[ELF] user process loaded\n");
+        } else {
+            terminal_write("[ELF] load failed\n");
+        }
+    }
 
     shell_run();
 }
