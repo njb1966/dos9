@@ -1,5 +1,6 @@
 #include <pmm.h>
 #include <multiboot.h>
+#include <kernel.h>
 #include <terminal.h>
 #include <stddef.h>
 
@@ -104,8 +105,9 @@ void pmm_init(uint32_t magic, void *mbi_ptr) {
     }
 
     /* 3. Re-mark the kernel + bitmap region used.
-          bitmap_words * 4 bytes for the bitmap itself. */
-    uint32_t protected_end = (uint32_t)_kernel_end + bitmap_words * sizeof(uint32_t);
+          _kernel_end is a virtual address; convert to physical for PMM. */
+    uint32_t phys_kernel_end = PHYS((uint32_t)_kernel_end);
+    uint32_t protected_end   = phys_kernel_end + bitmap_words * sizeof(uint32_t);
     mark_used(0, protected_end);
 
     /* Report. */
