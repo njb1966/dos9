@@ -10,6 +10,7 @@
 #include <pit.h>
 #include <process.h>
 #include <devfs.h>
+#include <procfs.h>
 #include <vfs.h>
 #include <stdint.h>
 
@@ -49,6 +50,7 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     terminal_write("[PIT] 100 Hz\n");
 
     devfs_init();
+    procfs_init();
     vfs_init();
     terminal_write("[VFS] mounted\n");
 

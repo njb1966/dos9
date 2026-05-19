@@ -4,7 +4,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define MAX_PROCS   8
 #define KSTACK_SIZE 8192u   /* 8KB kernel stack per process */
 #define TIMESLICE   5u      /* timer ticks per scheduling quantum */
 
@@ -107,6 +106,13 @@ process_t *process_create(void (*entry)(void), const char *name) {
 
     proc_table[n_procs++] = p;
     return p;
+}
+
+int process_count(void) { return n_procs; }
+
+process_t *process_get(int idx) {
+    if (idx < 0 || idx >= n_procs) return NULL;
+    return proc_table[idx];
 }
 
 void schedule(void) {

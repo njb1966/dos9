@@ -1,6 +1,8 @@
 #pragma once
 #include <stdint.h>
 
+#define MAX_PROCS     8
+
 /* process_t.state values */
 #define PROC_RUNNING  0
 #define PROC_READY    1
@@ -27,3 +29,5 @@ typedef struct process {
 void       process_init(void);
 process_t *process_create(void (*entry)(void), const char *name);
 void       schedule(void);
+int        process_count(void);
+process_t *process_get(int idx);

@@ -25,6 +25,7 @@ static void cmd_help(void) {
     terminal_write("  halt            halt the CPU\n");
     terminal_write("  ls [path]       list directory (default: /)\n");
     terminal_write("  cat [path]      print file contents\n");
+    terminal_write("Paths:  /dev  /proc\n");
 }
 
 static void cmd_halt(void) {

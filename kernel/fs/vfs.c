@@ -2,22 +2,24 @@
 #include <string.h>
 #include <stddef.h>
 
-/* devfs_root is registered here; defined in devfs.c */
+/* Synthetic filesystem roots — defined in their respective .c files */
 extern vnode_t devfs_root;
+extern vnode_t procfs_root;
 
 /* ── rootfs ──────────────────────────────────────────────────────────── */
 
 static vnode_t *rootfs_lookup(vnode_t *dir, const char *name) {
     (void)dir;
-    if (strcmp(name, "dev") == 0)  return &devfs_root;
+    if (strcmp(name, "dev")  == 0) return &devfs_root;
+    if (strcmp(name, "proc") == 0) return &procfs_root;
     return NULL;
 }
 
 static int rootfs_readdir(vnode_t *dir, uint32_t idx,
                            char *name_out, uint32_t nmax) {
     (void)dir;
-    static const char *entries[] = { "dev" };
-    if (idx >= 1) return -1;
+    static const char *entries[] = { "dev", "proc" };
+    if (idx >= 2) return -1;
     strncpy(name_out, entries[idx], nmax);
     return 0;
 }
