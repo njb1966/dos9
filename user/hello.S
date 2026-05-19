@@ -1,7 +1,8 @@
-/* Minimal user-space hello world for DOS/9.
-   Linked at 0x400000.  Uses int 0x80 syscall ABI:
-     eax = syscall number
-     ebx = arg1, ecx = arg2, edx = arg3 */
+/* Minimal user-space hello for DOS/9.
+   Writes a greeting via int 0x80 SYS_WRITE, then loops forever so the
+   process is still alive when the shell tries `rm /proc/<pid>`.
+
+   Linked at 0x400000.  Syscall ABI: eax = number, ebx/ecx/edx = args. */
 
 .section .text
 .global _start
@@ -13,13 +14,10 @@ _start:
     movl $23,    %edx
     int  $0x80
 
-    /* SYS_EXIT(code=0) */
-    movl $0, %eax
-    movl $0, %ebx
-    int  $0x80
-
-    /* Should never reach here */
-    hlt
+    /* Spin at ring 3 until the kernel marks us dead.  hlt is privileged
+       and would #GP, so we just yield-by-pause and loop. */
+1:  pause
+    jmp 1b
 
 .section .rodata
 msg:

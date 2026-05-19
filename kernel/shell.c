@@ -33,6 +33,7 @@ static void cmd_help(void) {
     terminal_write("  ls [path]       list directory (default: /)\n");
     terminal_write("  cat [path]      print file contents\n");
     terminal_write("  exec [path]     load ELF from path, run at ring 3\n");
+    terminal_write("  rm [path]       unlink (rm /proc/<pid> kills pid)\n");
     terminal_write("Paths:  /dev  /proc  /mod\n");
 }
 
@@ -125,6 +126,15 @@ static void cmd_exec(const char *path) {
     process_create_user(entry, name, pd_phys);
 }
 
+static void cmd_rm(const char *path) {
+    if (!*path) { terminal_write("rm: missing path\n"); return; }
+    if (vfs_unlink(path) < 0) {
+        terminal_write("rm: cannot unlink: ");
+        terminal_write(path);
+        terminal_putchar('\n');
+    }
+}
+
 static void cmd_cat(const char *path) {
     if (!*path) {
         terminal_write("cat: missing path\n");
@@ -155,6 +165,7 @@ static void execute(const char *cmd) {
     if ((arg = match(cmd, "halt")) && !*arg) { cmd_halt();    return; }
     if ((arg = match(cmd, "echo")))          { cmd_echo(arg); return; }
     if ((arg = match(cmd, "exec")))          { cmd_exec(arg); return; }
+    if ((arg = match(cmd, "rm")))            { cmd_rm(arg);   return; }
     if ((arg = match(cmd, "ls")))            { cmd_ls(arg);   return; }
     if ((arg = match(cmd, "cat")))           { cmd_cat(arg);  return; }
 

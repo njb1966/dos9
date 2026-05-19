@@ -25,6 +25,10 @@ typedef struct fs_ops {
     struct vnode * (*lookup)(struct vnode *dir, const char *name);
     int            (*readdir)(struct vnode *dir, uint32_t idx,
                               char *name_out, uint32_t nmax);
+    /* Remove a name from a directory.  For synthetic FSes the action may
+       have side effects beyond filesystem state — e.g. /proc unlink kills
+       the process.  Return 0 on success, -1 on error. */
+    int            (*unlink)(struct vnode *dir, const char *name);
 } fs_ops_t;
 
 typedef struct vnode {
@@ -58,3 +62,7 @@ int vfs_read(int fd, void *buf, uint32_t len);
 int vfs_write(int fd, const void *buf, uint32_t len);
 int vfs_close(int fd);
 int vfs_readdir(int fd, uint32_t idx, char *name_out, uint32_t nmax);
+
+/* Remove a name from its parent directory.  Returns 0 on success, -1 on
+   error or if the parent's filesystem doesn't implement unlink. */
+int vfs_unlink(const char *path);

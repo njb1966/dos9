@@ -115,9 +115,22 @@ static int proc_root_readdir(vnode_t *dir, uint32_t idx,
     return -1;
 }
 
+/* rm /proc/<pid> kills the process — the §1.1 commitment, made typeable. */
+static int proc_root_unlink(vnode_t *dir, const char *name) {
+    (void)dir;
+    if (!*name) return -1;
+    uint32_t pid = 0;
+    for (const char *s = name; *s; s++) {
+        if (*s < '0' || *s > '9') return -1;
+        pid = pid * 10 + (uint32_t)(*s - '0');
+    }
+    return process_kill(pid);
+}
+
 static fs_ops_t proc_root_ops = {
     .lookup  = proc_root_lookup,
     .readdir = proc_root_readdir,
+    .unlink  = proc_root_unlink,
 };
 
 static vnode_t procfs_root = {

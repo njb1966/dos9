@@ -236,3 +236,26 @@ int vfs_readdir(int fd, uint32_t idx, char *name_out, uint32_t nmax) {
     if (!ops || !ops->readdir) return -1;
     return ops->readdir(f->vnode, idx, name_out, nmax);
 }
+
+int vfs_unlink(const char *path) {
+    if (!path || path[0] != '/') return -1;
+
+    /* Find last '/' to split parent from name. */
+    const char *last_slash = path;
+    for (const char *p = path; *p; p++) if (*p == '/') last_slash = p;
+    if (!last_slash[1]) return -1;                  /* trailing slash → no name */
+
+    /* Extract parent path; "/foo" → "/", "/proc/3" → "/proc". */
+    char parent[64];
+    uint32_t plen = (uint32_t)(last_slash - path);
+    if (plen == 0) { parent[0] = '/'; parent[1] = '\0'; }
+    else {
+        if (plen >= sizeof(parent)) return -1;
+        for (uint32_t i = 0; i < plen; i++) parent[i] = path[i];
+        parent[plen] = '\0';
+    }
+
+    vnode_t *dir = vfs_lookup(parent);
+    if (!dir || !dir->ops || !dir->ops->unlink) return -1;
+    return dir->ops->unlink(dir, last_slash + 1);
+}

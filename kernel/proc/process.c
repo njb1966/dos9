@@ -130,6 +130,21 @@ void process_exit(void) {
     for (;;) schedule();
 }
 
+int process_kill(uint32_t pid) {
+    if (pid == 0) return -1;                /* never kill init */
+    for (int i = 0; i < n_procs; i++) {
+        process_t *p = proc_table[i];
+        if (!p || p->pid != pid) continue;
+        if (p->state == PROC_DEAD) return 0;
+        p->state = PROC_DEAD;
+        if (i == cur) {                     /* killed self → never return */
+            for (;;) schedule();
+        }
+        return 0;
+    }
+    return -1;
+}
+
 int process_count(void) { return n_procs; }
 
 process_t *process_get(int idx) {

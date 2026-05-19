@@ -35,3 +35,8 @@ void       schedule(void);
 void       process_exit(void);
 int        process_count(void);
 process_t *process_get(int idx);
+
+/* Mark the process with the given pid as dead.  The scheduler skips dead
+   processes on its next pass.  Refuses to kill pid 0 (init).  Returns 0 on
+   success, -1 if no such pid or if pid is 0. */
+int        process_kill(uint32_t pid);
