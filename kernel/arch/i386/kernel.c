@@ -11,10 +11,9 @@
 #include <process.h>
 #include <devfs.h>
 #include <procfs.h>
+#include <modfs.h>
 #include <vfs.h>
 #include <syscall.h>
-#include <elf.h>
-#include <multiboot.h>
 #include <kernel.h>
 #include <stdint.h>
 
@@ -56,8 +55,9 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     vfs_init();
     devfs_init();
     procfs_init();
+    modfs_init();
     vfs_open_stdio();
-    terminal_write("[VFS] / /dev /proc mounted\n");
+    terminal_write("[VFS] / /dev /proc /mod mounted\n");
 
     syscall_init();
     terminal_write("[SYSCALL] int 0x80 gate active\n");
@@ -66,23 +66,7 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     process_create(spinner_task, "spinner");
     terminal_write("[PROC] scheduler active\n");
 
-    /* If a Multiboot module was passed (via -initrd), load it as a user ELF.
-       Use the pmm-saved snapshot rather than re-reading mbi; the original
-       mods array may live inside the PMM bitmap region. */
-    (void)mb_info;
-    if (mb_magic == MULTIBOOT_MAGIC && pmm_mod_count() > 0) {
-        struct multiboot_mod *mod = pmm_mod(0);
-        const void *elf_data = (const void *)VIRT(mod->mod_start);
-        uint32_t    elf_size = mod->mod_end - mod->mod_start;
-        uint32_t    pd_phys  = 0;
-        uint32_t    entry    = elf_load(elf_data, elf_size, &pd_phys);
-        if (entry) {
-            process_create_user(entry, "init", pd_phys);
-            terminal_write("[ELF] user process loaded\n");
-        } else {
-            terminal_write("[ELF] load failed\n");
-        }
-    }
+    (void)mb_magic; (void)mb_info;   /* now consumed by pmm_init / modfs */
 
     shell_run();
 }

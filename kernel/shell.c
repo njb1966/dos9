@@ -5,6 +5,10 @@
 #include <io.h>
 #include <string.h>
 #include <syscall.h>
+#include <elf.h>
+#include <process.h>
+#include <kheap.h>
+#include <stdint.h>
 #include <stddef.h>
 
 #define LINE_MAX 256
@@ -28,7 +32,8 @@ static void cmd_help(void) {
     terminal_write("  echo [text]     write text via int 0x80 syscall\n");
     terminal_write("  ls [path]       list directory (default: /)\n");
     terminal_write("  cat [path]      print file contents\n");
-    terminal_write("Paths:  /dev  /proc\n");
+    terminal_write("  exec [path]     load ELF from path, run at ring 3\n");
+    terminal_write("Paths:  /dev  /proc  /mod\n");
 }
 
 static void cmd_echo(const char *arg) {
@@ -70,6 +75,56 @@ static void cmd_ls(const char *path) {
     vfs_close(fd);
 }
 
+/* Read a file in full into a kheap-allocated buffer.  Caller kfrees.
+   Returns NULL on error, sets *size_out to the byte count read. */
+static void *slurp(const char *path, uint32_t *size_out) {
+    int fd = vfs_open(path, O_RDONLY);
+    if (fd < 0) return NULL;
+
+    #define SLURP_MAX (64u * 1024u)
+    uint8_t *buf = kmalloc(SLURP_MAX);
+    if (!buf) { vfs_close(fd); return NULL; }
+
+    uint32_t total = 0;
+    int n;
+    while (total < SLURP_MAX &&
+           (n = vfs_read(fd, buf + total, SLURP_MAX - total)) > 0) {
+        total += (uint32_t)n;
+    }
+    vfs_close(fd);
+    *size_out = total;
+    return buf;
+}
+
+static void cmd_exec(const char *path) {
+    if (!*path) { terminal_write("exec: missing path\n"); return; }
+
+    uint32_t size = 0;
+    void *bin = slurp(path, &size);
+    if (!bin) {
+        terminal_write("exec: cannot read: ");
+        terminal_write(path);
+        terminal_putchar('\n');
+        return;
+    }
+
+    uint32_t pd_phys = 0;
+    uint32_t entry   = elf_load(bin, size, &pd_phys);
+    kfree(bin);
+
+    if (!entry) {
+        terminal_write("exec: not a valid ELF: ");
+        terminal_write(path);
+        terminal_putchar('\n');
+        return;
+    }
+
+    /* Derive a short process name from the path's final component. */
+    const char *name = path;
+    for (const char *s = path; *s; s++) if (*s == '/') name = s + 1;
+    process_create_user(entry, name, pd_phys);
+}
+
 static void cmd_cat(const char *path) {
     if (!*path) {
         terminal_write("cat: missing path\n");
@@ -99,6 +154,7 @@ static void execute(const char *cmd) {
     if ((arg = match(cmd, "help")) && !*arg) { cmd_help();    return; }
     if ((arg = match(cmd, "halt")) && !*arg) { cmd_halt();    return; }
     if ((arg = match(cmd, "echo")))          { cmd_echo(arg); return; }
+    if ((arg = match(cmd, "exec")))          { cmd_exec(arg); return; }
     if ((arg = match(cmd, "ls")))            { cmd_ls(arg);   return; }
     if ((arg = match(cmd, "cat")))           { cmd_cat(arg);  return; }
 
