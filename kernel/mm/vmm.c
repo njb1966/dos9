@@ -8,10 +8,6 @@
 #define PD_ENTRIES  1024u
 #define PT_ENTRIES  1024u
 
-/* Page directory/table entry flags */
-#define PF_PRESENT  (1u << 0)
-#define PF_WRITE    (1u << 1)
-
 /*
  * Build a proper 4KB page directory and switch to it.
  *
@@ -58,4 +54,34 @@ void vmm_init(void) {
     __asm__ volatile("mov %0, %%cr3" :: "r"(pd_phys) : "memory");
 
     terminal_write("[VMM] 4KB paging active\n");
+}
+
+/*
+ * Map a single 4KB virtual page to a physical frame.
+ *
+ * Reads CR3 to find the current page directory. All physical frames are
+ * accessible at VIRT(phys) via the linear map set up by vmm_init(), so
+ * we can walk and modify page tables without a separate kernel mapping.
+ * Creates a new page table if the PD entry is absent.
+ */
+void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
+    uint32_t pd_phys;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(pd_phys));
+    uint32_t *pd = (uint32_t *)VIRT(pd_phys);
+
+    uint32_t pd_idx = vaddr >> 22;
+    uint32_t pt_idx = (vaddr >> 12) & 0x3FFu;
+
+    if (!(pd[pd_idx] & PF_PRESENT)) {
+        uint32_t pt_phys = (uint32_t)pmm_alloc_frame();
+        uint32_t *pt = (uint32_t *)VIRT(pt_phys);
+        for (uint32_t i = 0; i < PT_ENTRIES; i++) pt[i] = 0;
+        pd[pd_idx] = pt_phys | PF_PRESENT | PF_WRITE;
+    }
+
+    uint32_t pt_phys = pd[pd_idx] & ~0xFFFu;
+    uint32_t *pt = (uint32_t *)VIRT(pt_phys);
+    pt[pt_idx] = (paddr & ~0xFFFu) | flags;
+
+    __asm__ volatile("invlpg (%0)" :: "r"(vaddr) : "memory");
 }
