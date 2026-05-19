@@ -5,6 +5,7 @@
 #include <keyboard.h>
 #include <shell.h>
 #include <pmm.h>
+#include <vmm.h>
 #include <stdint.h>
 
 static volatile uint32_t timer_ticks = 0;
@@ -33,6 +34,7 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     terminal_write("[KBD] ready\n");
 
     pmm_init(mb_magic, mb_info);
+    vmm_init();
 
     shell_run();
 }

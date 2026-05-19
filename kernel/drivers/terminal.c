@@ -9,7 +9,7 @@
 
 #define VGA_WIDTH  80
 #define VGA_HEIGHT 25
-#define VGA_ADDR   ((volatile uint16_t *)0xB8000)
+#define VGA_ADDR   ((volatile uint16_t *)0xC00B8000)
 
 #define FG_GREEN 10
 #define BG_BLACK  0
