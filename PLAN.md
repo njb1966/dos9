@@ -197,16 +197,17 @@ This is the emotional hardest phase. It looks like nothing. It is the foundation
 - [ ] **Shell: structured pipes** — currently byte-stream; typed record framing deferred until built-in piping is solved (needs fork or in-process concurrency).
 - [x] **Shell: scripting** — variables (`set`/`unset`/`env`, `$expansion`), `if <cmd> ... end` (condition runs immediately, block executes if exit 0), `for name in words ... end`, `loop ... end` with `break`; `true`/`false` built-ins. Kernel: `process_t.exit_code` + `sys_waitpid` returns child exit code. (`user/sh.c`, `kernel/proc/process.c`, `kernel/arch/i386/syscall.c`)
 - [x] **Shell: inline help** — `--help` on every built-in; `help <cmd>` looks up usage+desc from `cmd_entry_t` table; table-driven dispatch replaces dispatch chain. (`user/sh.c`)
-- [ ] **TUI toolkit** — consistent widget library: menus, dialogs, borders, color schemes, F-key bindings. Turbo Vision lineage. Required by file manager and editor.
-- [ ] **File manager** — Norton Commander-style, two panes, F-key actions, fast keyboard navigation. Built on TUI toolkit.
-- [ ] **Text editor** — `EDIT.COM`'s spiritual descendant. Full-screen, no modal nonsense, built on TUI toolkit.
+- [x] **TUI toolkit** — ANSI CSI parser in terminal.c (cursor move, SGR 16-colour, ED/EL, cursor hide/show); `user/libc/tui.h` + `tui.c` (tui_move/color/fill/puts/putch/box); `user/tuidemo.c` smoke-test. (2026-05-20)
+- [x] **File manager** — Two-pane NC-style navigator (`user/fm.c`); probe_entry for dir detection across all VFS backends; Enter=exec/enter, Tab=switch, Bksp=up, R=reload, Q=quit. (2026-05-20)
+- [x] **Text editor** — `user/ed.c`: full-screen, arrows/^S/^Q/^K, 300-line buffer, creates new files via O_CREAT. (2026-05-20)
+- [x] **Disk write** — ATA PIO write (`ata_write_sector`); diskfs in-place overwrite + file creation; O_CREAT in vfs_open; alloc_sectors in dirent. (2026-05-20)
+- [x] **argv support** — write_user_argv writes argc/argv to topmost user stack page; crt0.S reads from initial esp; shell passes args via execv(). (2026-05-20)
 - [ ] **Package system** — simple, signed. Installs ELF binaries + metadata to `/disk`. No dependency resolver for v1.
 
 #### Known technical debt / future improvements
 - ELF loader (`elf_load`) copies segment data byte-by-byte via page-table walk. Should batch by page.
 - `sys_exec` reads entire ELF into kernel heap before loading. Future: fd-based streaming loader eliminates the buffer.
 - Process table is fixed at 8 slots. Increase when user workloads grow.
-- No `write()` syscall to disk (DOS9FS is read-only from user space). Needed before package system.
 - **Pipe EOF via `refs`**: `wv->refs == 0` works for the current single-fd-per-end use, but `refs` counts fd-table slots, not writers. `dup(write_fd)` inflates refs without adding a writer; a read-end `dup` prevents EOF. Acceptable for current usage; revisit if pipelines become more complex.
 - **`sys_waitpid` slot recycling**: if a child's slot is recycled before `waitpid` is called, the return value is 0 (slot gone = treat as success). `if run /prog` may silently miss failure in this edge case.
 - **`block_collect` line limit**: silently drops lines beyond 64; `malloc` failures in block collection also drop lines silently. Both should emit an error.
