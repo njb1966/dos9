@@ -6,9 +6,10 @@ OBJDUMP := $(CROSS)-objdump
 CFLAGS  := -std=gnu99 -ffreestanding -O2 -Wall -Wextra -Ikernel/include
 LDFLAGS := -T kernel/arch/i386/linker.ld -ffreestanding -O2 -nostdlib -lgcc
 
-BUILD    := build
-KERNEL   := $(BUILD)/kernel.elf
-USER_ELF := $(BUILD)/user/hello.elf
+BUILD      := build
+KERNEL     := $(BUILD)/kernel.elf
+USER_ELF   := $(BUILD)/user/hello.elf
+USER_SH    := $(BUILD)/user/sh.elf
 
 # Kernel sources
 C_SRCS  := $(shell find kernel -name '*.c')
@@ -33,7 +34,7 @@ MKDISK := tools/mkdisk
 
 .PHONY: all clean run debug disk
 
-all: $(KERNEL) $(USER_ELF)
+all: $(KERNEL) $(USER_ELF) $(USER_SH)
 
 # ── User-space (libc + programs) — defined before generic kernel rules ────
 
@@ -52,6 +53,14 @@ $(BUILD)/user/hello_main.o: user/hello.c
 $(USER_ELF): $(LIBC_OBJS) $(BUILD)/user/hello_main.o user/user.ld
 	$(LD) -T user/user.ld -o $@ \
 	    $(LIBC_CRT0) $(BUILD)/user/hello_main.o $(LIBC_C_OBJS)
+
+$(BUILD)/user/sh_main.o: user/sh.c
+	@mkdir -p $(dir $@)
+	$(CC) $(UCFLAGS) -c $< -o $@
+
+$(USER_SH): $(LIBC_OBJS) $(BUILD)/user/sh_main.o user/user.ld
+	$(LD) -T user/user.ld -o $@ \
+	    $(LIBC_CRT0) $(BUILD)/user/sh_main.o $(LIBC_C_OBJS)
 
 # ── Kernel ────────────────────────────────────────────────────────────────
 
@@ -75,14 +84,14 @@ $(MKDISK): tools/mkdisk.c
 # Writes DOS9FS to disk.img with the user hello ELF as "hello".
 # Run once after initial 'dd' setup, then again whenever user programs change.
 
-disk: $(MKDISK) $(USER_ELF)
+disk: $(MKDISK) $(USER_ELF) $(USER_SH)
 	@[ -f disk.img ] || { echo "error: disk.img not found — run: dd if=/dev/zero of=disk.img bs=512 count=16384" >&2; exit 1; }
-	./$(MKDISK) disk.img hello=$(USER_ELF)
+	./$(MKDISK) disk.img hello=$(USER_ELF) sh=$(USER_SH)
 
-run: $(KERNEL) $(USER_ELF)
+run: $(KERNEL) $(USER_ELF) $(USER_SH)
 	./scripts/qemu.sh
 
-debug: $(KERNEL) $(USER_ELF)
+debug: $(KERNEL) $(USER_ELF) $(USER_SH)
 	./scripts/qemu.sh --debug
 
 clean:

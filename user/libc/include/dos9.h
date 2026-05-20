@@ -11,7 +11,11 @@
 #define SYS_CLOSE  4
 #define SYS_LSEEK  5
 #define SYS_GETPID 6
-#define SYS_BRK    7
+#define SYS_BRK     7
+#define SYS_EXEC    8
+#define SYS_READDIR 9
+#define SYS_UNLINK  10
+#define SYS_WAITPID 11
 
 /* ── File descriptor constants ────────────────────────────────────────── */
 #define STDIN_FILENO  0
@@ -34,6 +38,15 @@ static inline int32_t _syscall3(int32_t n, int32_t a, int32_t b, int32_t c) {
     __asm__ volatile("int $0x80"
         : "=a"(ret)
         : "a"(n), "b"(a), "c"(b), "d"(c)
+        : "memory");
+    return ret;
+}
+/* _syscall4: uses esi (register "S") for the 4th argument. */
+static inline int32_t _syscall4(int32_t n, int32_t a, int32_t b, int32_t c, int32_t d) {
+    int32_t ret;
+    __asm__ volatile("int $0x80"
+        : "=a"(ret)
+        : "a"(n), "b"(a), "c"(b), "d"(c), "S"(d)
         : "memory");
     return ret;
 }
@@ -77,6 +90,28 @@ static inline int getpid(void) {
 static inline void *sbrk(int32_t increment) {
     int32_t ret = _syscall1(SYS_BRK, increment);
     return (void *)(int32_t)ret;   /* (void*)-1 on error */
+}
+
+/* exec — spawn a new user process from path; returns new pid, -1 on error. */
+static inline int exec(const char *path) {
+    return (int)_syscall1(SYS_EXEC, (int32_t)(uintptr_t)path);
+}
+
+/* readdir — read directory entry at idx; returns 1 if found, 0 at end, -1 error. */
+static inline int readdir(int fd, uint32_t idx, char *buf, uint32_t nmax) {
+    return (int)_syscall4(SYS_READDIR, (int32_t)fd,
+                          (int32_t)(uintptr_t)buf, (int32_t)nmax,
+                          (int32_t)idx);
+}
+
+/* unlink — remove a file by path; returns 0 on success, -1 on error. */
+static inline int unlink(const char *path) {
+    return (int)_syscall1(SYS_UNLINK, (int32_t)(uintptr_t)path);
+}
+
+/* waitpid — block until pid exits; returns 0, -1 on error. */
+static inline int waitpid(int pid) {
+    return (int)_syscall1(SYS_WAITPID, (int32_t)pid);
 }
 
 /* ── stdio ──────────────────────────────────────────────────────────────── */

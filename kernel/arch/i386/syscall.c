@@ -7,6 +7,8 @@
 #include <kernel.h>
 #include <string.h>
 #include <stdint.h>
+#include <kheap.h>
+#include <elf.h>
 
 extern void isr128(void);
 
@@ -89,6 +91,74 @@ static int32_t sys_brk(int32_t increment) {
     return (int32_t)old_brk;   /* caller's allocation starts at old_brk */
 }
 
+/*
+ * sys_exec — load and launch a user ELF from a path.
+ * Returns the new PID on success, -1 on failure.
+ */
+static int32_t sys_exec(const char *path) {
+    int fd = vfs_open(path, O_RDONLY);
+    if (fd < 0) return -1;
+
+    /* Determine file size via lseek. */
+    int32_t size = vfs_lseek(fd, 0, SEEK_END);
+    if (size <= 0) { vfs_close(fd); return -1; }
+    vfs_lseek(fd, 0, SEEK_SET);
+
+    void *buf = kmalloc((uint32_t)size);
+    if (!buf) { vfs_close(fd); return -1; }
+
+    int n = vfs_read(fd, buf, (uint32_t)size);
+    vfs_close(fd);
+    if (n != size) { kfree(buf); return -1; }
+
+    uint32_t pd_phys = 0, brk_start = 0;
+    uint32_t entry = elf_load(buf, (uint32_t)size, &pd_phys, &brk_start);
+    kfree(buf);
+    if (!entry || !pd_phys) return -1;
+
+    /* Derive a short name from the path (basename). */
+    const char *name = path;
+    for (const char *p = path; *p; p++)
+        if (*p == '/') name = p + 1;
+
+    process_t *p = process_create_user(entry, name, pd_phys);
+    if (!p) return -1;
+    p->brk = brk_start;
+    return (int32_t)p->pid;
+}
+
+/* sys_readdir — thin wrapper: fd + index → name (idx in edx, buf in ecx, nmax in esi). */
+static int32_t sys_readdir(int32_t fd, char *buf, uint32_t nmax, uint32_t idx) {
+    return vfs_readdir(fd, idx, buf, nmax);
+}
+
+/* sys_unlink — remove a name from its parent directory. */
+static int32_t sys_unlink(const char *path) {
+    return vfs_unlink(path);
+}
+
+/*
+ * sys_waitpid — block until the target process is PROC_DEAD or gone.
+ * Returns 0 on success, -1 if pid never existed.
+ */
+static int32_t sys_waitpid(int32_t pid) {
+    int found = 0;
+    for (;;) {
+        found = 0;
+        for (int i = 0; i < MAX_PROCS; i++) {
+            process_t *p = process_get(i);
+            if (!p) continue;
+            if ((int32_t)p->pid == pid) {
+                found = 1;
+                if (p->state == PROC_DEAD) return 0;
+                break;
+            }
+        }
+        if (!found) return 0;   /* already gone */
+        schedule();
+    }
+}
+
 /* ── dispatcher ──────────────────────────────────────────────────────── */
 
 void syscall_handler(struct registers *r) {
@@ -102,7 +172,12 @@ void syscall_handler(struct registers *r) {
     case SYS_LSEEK:  ret = sys_lseek ((int32_t)r->ebx, (int32_t)r->ecx,
                                       (int32_t)r->edx);                          break;
     case SYS_GETPID: ret = sys_getpid();                                          break;
-    case SYS_BRK:    ret = sys_brk   ((int32_t)r->ebx);                          break;
+    case SYS_BRK:     ret = sys_brk    ((int32_t)r->ebx);                          break;
+    case SYS_EXEC:    ret = sys_exec   ((const char *)r->ebx);                    break;
+    case SYS_READDIR: ret = sys_readdir((int32_t)r->ebx, (char *)r->ecx,
+                                        r->edx, r->esi);                          break;
+    case SYS_UNLINK:  ret = sys_unlink ((const char *)r->ebx);                    break;
+    case SYS_WAITPID: ret = sys_waitpid((int32_t)r->ebx);                         break;
     }
     r->eax = (uint32_t)ret;
 }
