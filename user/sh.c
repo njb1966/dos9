@@ -107,7 +107,7 @@ static void cmd_pid(void) {
 /* ── main loop ───────────────────────────────────────────────────────────── */
 
 int main(void) {
-    puts("DOS/9 sh — type 'help' for commands");
+    puts("DOS/9 sh - type 'help' for commands");
 
     char line[LINE_MAX];
     for (;;) {

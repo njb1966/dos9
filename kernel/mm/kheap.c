@@ -7,7 +7,7 @@
 
 #define PAGE_SIZE    4096u
 #define HEAP_START   0xD0000000u
-#define HEAP_PAGES   256u           /* 1MB initial heap */
+#define HEAP_PAGES   1024u          /* 4MB kernel heap */
 #define HEAP_MAGIC   0xDEAD4EADu
 
 /*

@@ -3,7 +3,7 @@
 > **Project name:** **DOS/9** (pronounced "dos-nine")
 > **Tagline:** Simple. Visible. Yours.
 > **Sub tagline:** A Native Text Operating System
-> **Status:** Phase 2 complete — boots to prompt, disk FS, user ring-3 processes, C libc.
+> **Status:** Phase 3 in progress — user-space shell running at ring 3; SYS_EXEC/READDIR/UNLINK/WAITPID live.
 > **Repository:** https://github.com/njb1966/dos9 (GitHub only — see CLAUDE.md for push workflow)
 
 DOS/9
@@ -149,38 +149,60 @@ This is the emotional hardest phase. It looks like nothing. It is the foundation
 
 **Estimated effort:** 2–4 months of evenings and weekends, depending on how often you have to read the Intel SDM.
 
-### Phase 2 — Real kernel services
+### Phase 2 — Real kernel services ✓ COMPLETE
 
 **Goal:** Have the things a real OS has, even if they're minimal. **This is where the "everything is a file" commitment becomes architectural reality** — the VFS must be designed early because every later subsystem will hang off it.
 
-- [ ] Physical memory manager (bitmap allocator).
-- [ ] Virtual memory: paging, page directory/table setup, kernel mapped high, user space low.
-- [ ] Kernel heap (kmalloc/kfree).
-- [ ] Timer (PIT) and preemptive scheduling.
-- [ ] Processes and context switching.
-- [ ] System call interface (interrupt-based, e.g., `int 0x80`).
-- [ ] **Virtual File System (VFS) layer.** Critical. This is where DOS/9 commits to "everything is a file." The VFS must support multiple filesystem types mounted into a single namespace from day one, including synthetic filesystems (`/dev`, `/proc`, `/sys`) backed by kernel state, not disk. Get this right early or pay forever.
-- [ ] **`/dev` synthetic filesystem.** Devices appear here. Keyboard, console, serial port. Read and write them like files. This is the v1 demonstration of the Plan 9 commitment.
-- [ ] **`/proc` synthetic filesystem.** Process state exposed as files. Even a minimal `/proc/<pid>/status` is enough to make the philosophy visible.
-- [ ] A real ELF loader so you can run user-space programs.
-- [ ] A minimal libc for our userland (or port an existing one — newlib is the usual choice).
-- [ ] A disk-backed filesystem. **Decision pending:** roll our own (DOS-lineage, FAT-influenced but evolved) or port an existing one (ext2 is well-documented). Lean toward rolling our own for thematic reasons. Call it something with personality.
+- [x] Physical memory manager (bitmap allocator). (`kernel/mm/pmm.c`)
+- [x] Virtual memory: paging, page directory/table setup, kernel mapped high (`0xC0000000`), user space low. (`kernel/mm/vmm.c`)
+- [x] Kernel heap (kmalloc/kfree) — 4MB fixed-mapped at `0xD0000000`. (`kernel/mm/kheap.c`)
+- [x] Timer (PIT) at 100Hz, preemptive scheduling. (`kernel/arch/i386/pit.c`, `kernel/proc/process.c`)
+- [x] Processes and context switching — 8-slot table, per-process kernel stacks, ring-3 iret. (`kernel/proc/process.c`, `kernel/arch/i386/switch.S`)
+- [x] System call interface — `int 0x80`, SYS_EXIT/READ/WRITE/OPEN/CLOSE/LSEEK/GETPID/BRK/EXEC/READDIR/UNLINK/WAITPID. (`kernel/arch/i386/syscall.c`)
+- [x] **Virtual File System (VFS) layer** — multi-mount namespace, vnode/fs_ops abstraction, per-process fd tables. (`kernel/fs/vfs.c`)
+- [x] **`/dev` synthetic filesystem** — `/dev/con` (VGA console r/w), `/dev/kbd` (keyboard read). (`kernel/fs/devfs.c`)
+- [x] **`/proc` synthetic filesystem** — `/proc/<pid>` entries; `rm /proc/<pid>` kills process. (`kernel/fs/procfs.c`)
+- [x] **`/mod` synthetic filesystem** — loadable kernel module interface. (`kernel/fs/modfs.c`)
+- [x] ELF loader — parses PT_LOAD segments, maps into per-process page directory, returns entry + brk. (`kernel/arch/i386/elf.c`)
+- [x] User-space libc — crt0, stdio (printf/puts/putchar), string, stdlib, malloc/free/calloc/realloc. (`user/libc/`)
+- [x] DOS9FS disk filesystem — custom flat FS; mkdisk host tool; mounted at `/disk`. (`kernel/fs/diskfs.c`, `tools/mkdisk.c`)
+- [x] SYS_BRK (sbrk semantics) — extends user heap by mapping new pages into the process page directory.
+- [x] Per-process fd tables — `file_t fds[16]` in `process_t`; inherited on fork, closed on exit.
 
-**Exit criteria:** You can compile a user-space "hello world," load it from disk, run it, return cleanly. You can `cat /dev/kbd` and see keypresses. You can `ls /proc` and see running processes. The Plan 9 commitment is *visible to the user* at the prompt.
+**Exit criteria met:** User-space hello world loads from disk, runs at ring 3, returns cleanly. `cat /dev/kbd` shows keypresses. `ls /proc` shows running processes. Plan 9 commitment visible at the prompt.
 
-### Phase 3 — The shell becomes the OS
+### Phase 3 — The shell becomes the OS ← IN PROGRESS
 
 **Goal:** The userland is where this project *differentiates*. Everything before was foundation. This is the project's actual identity.
 
-- [ ] The shell. Not a port. Original. Designed. The features that matter:
-  - Structured pipes (typed records, not byte streams).
-  - First-class history, completion, integrated help.
-  - Scripting language that doesn't feel like sh + apologies.
-  - Inline documentation: `help <command>` is built into every command, always.
-- [ ] A TUI toolkit. Everything in this OS looks like it belongs to the same family. Consistent keybindings, consistent dialogs, consistent colors. The Turbo Vision lineage, modernized.
-- [ ] A file manager in the Norton Commander tradition. Two panes, F-key actions, fast keyboard navigation.
-- [ ] A text editor. EDIT.COM's spiritual descendant, but actually good. Modal or not — designer's call.
-- [ ] A package system. Simple. Signed. No dependency hell ambitions; the userland is small enough to curate.
+#### Phase 3 foundation (done)
+
+- [x] Per-process fd tables + SYS_LSEEK, SYS_GETPID.
+- [x] SYS_BRK + user-space malloc/free/calloc/realloc (free-list allocator, coalescing).
+- [x] SYS_EXEC — kernel loads ELF from VFS path, spawns ring-3 process, returns pid. Reads ELF into 4MB kernel heap (sufficient for Phase 3; fd-based streaming loader is future work).
+- [x] SYS_READDIR, SYS_UNLINK, SYS_WAITPID.
+- [x] `_syscall4` (esi as 4th arg) in user libc.
+- [x] `user/sh.c` — ring-3 shell: readline with echo/backspace, echo/ls/cat/exec/run/rm/pid commands.
+- [x] `sh.elf` on disk; boot sequence: `DOS/9> exec /disk/sh` → `sh>`.
+
+#### Phase 3 remaining
+
+- [ ] **Auto-launch sh at boot** — kernel shell auto-execs `/disk/sh` if present; falls back to `DOS/9>` prompt if not found.
+- [ ] **Shell: tab completion** — complete paths against VFS (opens dir, iterates readdir matches).
+- [ ] **Shell: command history** — up/down arrows cycle through previous lines (circular buffer).
+- [ ] **Shell: structured pipes** — typed records between commands, not raw byte streams. Design TBD.
+- [ ] **Shell: scripting** — minimal scripting language (variables, conditionals, loops). Not sh-compatible; DOS/9-native.
+- [ ] **Shell: inline help** — every built-in has a `--help` response; `help <cmd>` works from the prompt.
+- [ ] **TUI toolkit** — consistent widget library: menus, dialogs, borders, color schemes, F-key bindings. Turbo Vision lineage. Required by file manager and editor.
+- [ ] **File manager** — Norton Commander-style, two panes, F-key actions, fast keyboard navigation. Built on TUI toolkit.
+- [ ] **Text editor** — `EDIT.COM`'s spiritual descendant. Full-screen, no modal nonsense, built on TUI toolkit.
+- [ ] **Package system** — simple, signed. Installs ELF binaries + metadata to `/disk`. No dependency resolver for v1.
+
+#### Known technical debt / future improvements
+- ELF loader (`elf_load`) copies segment data byte-by-byte via page-table walk. Should batch by page.
+- `sys_exec` reads entire ELF into kernel heap before loading. Future: fd-based streaming loader eliminates the buffer.
+- Process table is fixed at 8 slots. Increase when user workloads grow.
+- No `write()` syscall to disk (DOS9FS is read-only from user space). Needed before package system.
 
 ### Phase 4 — Small web citizenship
 
