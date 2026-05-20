@@ -189,8 +189,12 @@ This is the emotional hardest phase. It looks like nothing. It is the foundation
 - [x] **Shell: command history** — 32-entry circular buffer; up/down arrows cycle entries; saves current partial line when browsing, restores on down past newest; skips consecutive duplicates. (`user/sh.c`)
 - [x] **Shell: tab completion** — splits last word at '/'; opens parent dir via VFS readdir; unique match appended in-place; multiple matches listed with prompt redraw. (`user/sh.c`)
 
+- [x] **Pipes** — anonymous kernel pipe (4KB ring buffer, `VTYPE_CHR` vnodes). VFS vnode reference counting added so `dup2` tracks write-end refs correctly; reader blocks until `write_vnode->refs == 0`. `SYS_PIPE`/`SYS_DUP`/`SYS_DUP2` syscalls + user wrappers. (`kernel/fs/pipe.c`, `vfs.c` refcount)
+- [x] **Shell: pipeline syntax** — `left | right`; pipe created, left exec'd with stdout→write end, right exec'd with stdin←read end; shell drops both ends and waits. External ELF programs on both sides; built-in piping deferred (needs fork). (`user/sh.c`)
+- [x] **`/disk/cat`** — stdin→stdout passthrough; test with `/disk/hello | /disk/cat`. (`user/cat.c`)
+
 #### Phase 3 remaining
-- [ ] **Shell: structured pipes** — typed records between commands, not raw byte streams. Design TBD.
+- [ ] **Shell: structured pipes** — currently byte-stream; typed record framing deferred until built-in piping is solved (needs fork or in-process concurrency).
 - [ ] **Shell: scripting** — minimal scripting language (variables, conditionals, loops). Not sh-compatible; DOS/9-native.
 - [ ] **Shell: inline help** — every built-in has a `--help` response; `help <cmd>` works from the prompt.
 - [ ] **TUI toolkit** — consistent widget library: menus, dialogs, borders, color schemes, F-key bindings. Turbo Vision lineage. Required by file manager and editor.

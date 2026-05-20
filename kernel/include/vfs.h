@@ -35,6 +35,7 @@ typedef struct vnode {
     uint32_t   size;   /* file size; 0 for dirs and char devs */
     void      *priv;   /* filesystem-private data */
     fs_ops_t  *ops;
+    uint32_t   refs;   /* reference count — close when refs reaches 0 */
 } vnode_t;
 
 /* ── Per-process file descriptor table ─────────────────────────────────── */
@@ -78,6 +79,13 @@ int vfs_readdir(int fd, uint32_t idx, char *name_out, uint32_t nmax);
 
 /* Remove a name from its parent directory. */
 int vfs_unlink(const char *path);
+
+/* Duplicate fds — reference-count aware. */
+int vfs_dup(int oldfd);               /* dup to next free slot */
+int vfs_dup2(int oldfd, int newfd);   /* dup to a specific slot */
+
+/* Open a vnode directly into the current process's fd table (used by pipes). */
+int vfs_open_vnode(vnode_t *v, int flags);
 
 /* Per-process fd table helpers — called by process.c. */
 void vfs_close_table(file_t *table);

@@ -10,6 +10,7 @@ BUILD      := build
 KERNEL     := $(BUILD)/kernel.elf
 USER_ELF   := $(BUILD)/user/hello.elf
 USER_SH    := $(BUILD)/user/sh.elf
+USER_CAT   := $(BUILD)/user/cat.elf
 
 # Kernel sources
 C_SRCS  := $(shell find kernel -name '*.c')
@@ -34,7 +35,7 @@ MKDISK := tools/mkdisk
 
 .PHONY: all clean run debug disk
 
-all: $(KERNEL) $(USER_ELF) $(USER_SH)
+all: $(KERNEL) $(USER_ELF) $(USER_SH) $(USER_CAT)
 
 # ── User-space (libc + programs) — defined before generic kernel rules ────
 
@@ -62,6 +63,14 @@ $(USER_SH): $(LIBC_OBJS) $(BUILD)/user/sh_main.o user/user.ld
 	$(LD) -T user/user.ld -o $@ \
 	    $(LIBC_CRT0) $(BUILD)/user/sh_main.o $(LIBC_C_OBJS)
 
+$(BUILD)/user/cat_main.o: user/cat.c
+	@mkdir -p $(dir $@)
+	$(CC) $(UCFLAGS) -c $< -o $@
+
+$(USER_CAT): $(LIBC_OBJS) $(BUILD)/user/cat_main.o user/user.ld
+	$(LD) -T user/user.ld -o $@ \
+	    $(LIBC_CRT0) $(BUILD)/user/cat_main.o $(LIBC_C_OBJS)
+
 # ── Kernel ────────────────────────────────────────────────────────────────
 
 $(BUILD)/%.o: %.c
@@ -84,14 +93,14 @@ $(MKDISK): tools/mkdisk.c
 # Writes DOS9FS to disk.img with the user hello ELF as "hello".
 # Run once after initial 'dd' setup, then again whenever user programs change.
 
-disk: $(MKDISK) $(USER_ELF) $(USER_SH)
+disk: $(MKDISK) $(USER_ELF) $(USER_SH) $(USER_CAT)
 	@[ -f disk.img ] || { echo "error: disk.img not found — run: dd if=/dev/zero of=disk.img bs=512 count=16384" >&2; exit 1; }
-	./$(MKDISK) disk.img hello=$(USER_ELF) sh=$(USER_SH)
+	./$(MKDISK) disk.img hello=$(USER_ELF) sh=$(USER_SH) cat=$(USER_CAT)
 
-run: $(KERNEL) $(USER_ELF) $(USER_SH)
+run: $(KERNEL) $(USER_ELF) $(USER_SH) $(USER_CAT)
 	./scripts/qemu.sh
 
-debug: $(KERNEL) $(USER_ELF) $(USER_SH)
+debug: $(KERNEL) $(USER_ELF) $(USER_SH) $(USER_CAT)
 	./scripts/qemu.sh --debug
 
 clean:

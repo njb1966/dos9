@@ -14,6 +14,9 @@
 #define SYS_READDIR 9   /* vfs_readdir exposed to user space */
 #define SYS_UNLINK  10  /* vfs_unlink exposed to user space */
 #define SYS_WAITPID 11  /* block until pid is dead */
+#define SYS_PIPE    12  /* create anonymous pipe; arg = int[2] for fds */
+#define SYS_DUP     13  /* duplicate fd to next free slot */
+#define SYS_DUP2    14  /* duplicate fd to a specific slot */
 
 /* Install the int 0x80 IDT gate. */
 void syscall_init(void);

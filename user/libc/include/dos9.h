@@ -16,6 +16,9 @@
 #define SYS_READDIR 9
 #define SYS_UNLINK  10
 #define SYS_WAITPID 11
+#define SYS_PIPE    12
+#define SYS_DUP     13
+#define SYS_DUP2    14
 
 /* ── File descriptor constants ────────────────────────────────────────── */
 #define STDIN_FILENO  0
@@ -112,6 +115,21 @@ static inline int unlink(const char *path) {
 /* waitpid — block until pid exits; returns 0, -1 on error. */
 static inline int waitpid(int pid) {
     return (int)_syscall1(SYS_WAITPID, (int32_t)pid);
+}
+
+/* pipe — create anonymous pipe; fds[0]=read end, fds[1]=write end. */
+static inline int pipe(int fds[2]) {
+    return (int)_syscall1(SYS_PIPE, (int32_t)(uintptr_t)fds);
+}
+
+/* dup — duplicate fd to next free slot; returns new fd, -1 on error. */
+static inline int dup(int fd) {
+    return (int)_syscall1(SYS_DUP, (int32_t)fd);
+}
+
+/* dup2 — duplicate oldfd to newfd; returns newfd, -1 on error. */
+static inline int dup2(int oldfd, int newfd) {
+    return (int)_syscall2(SYS_DUP2, (int32_t)oldfd, (int32_t)newfd);
 }
 
 /* ── stdio ──────────────────────────────────────────────────────────────── */

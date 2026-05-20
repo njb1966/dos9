@@ -202,6 +202,63 @@ static char *split_arg(char *buf) {
     return buf + 1;
 }
 
+/* ── pipeline ────────────────────────────────────────────────────────────── */
+
+/*
+ * Execute left_path | right_path as two concurrent processes connected
+ * by an anonymous pipe.  Both sides must be paths to ELF programs.
+ *
+ * Protocol (ensures correct EOF delivery via vnode refcounting):
+ *   1. Create pipe: fds p[0]=read, p[1]=write.
+ *   2. dup2 p[1] → STDOUT; exec left (inherits pipe-write at fd 1); restore STDOUT.
+ *   3. Shell closes p[1] — only left child now holds the write end.
+ *   4. dup2 p[0] → STDIN;  exec right (inherits pipe-read  at fd 0); restore STDIN.
+ *   5. Shell closes p[0].
+ *   6. waitpid(left) — when left exits, write_vnode->refs → 0 → reader sees EOF.
+ *   7. waitpid(right).
+ */
+static void execute_pipeline(char *left, char *right) {
+    /* Trim leading/trailing spaces. */
+    while (*left  == ' ') left++;
+    while (*right == ' ') right++;
+    int ll = (int)strlen(left);
+    int rl = (int)strlen(right);
+    while (ll > 0 && left[ll-1]  == ' ') left[--ll]  = '\0';
+    while (rl > 0 && right[rl-1] == ' ') right[--rl] = '\0';
+
+    if (!left[0] || !right[0]) { puts("pipe: empty command"); return; }
+
+    int p[2];
+    if (pipe(p) < 0) { puts("pipe: failed"); return; }
+
+    int saved_out = dup(STDOUT_FILENO);
+    int saved_in  = dup(STDIN_FILENO);
+    if (saved_out < 0 || saved_in < 0) {
+        puts("pipe: dup failed");
+        close(p[0]); close(p[1]);
+        if (saved_out >= 0) close(saved_out);
+        if (saved_in  >= 0) close(saved_in);
+        return;
+    }
+
+    /* Left side: stdout → pipe write. */
+    dup2(p[1], STDOUT_FILENO);
+    int left_pid = exec(left);
+    dup2(saved_out, STDOUT_FILENO);
+    close(saved_out);
+    close(p[1]);   /* shell drops write ref — only left child holds it now */
+
+    /* Right side: stdin ← pipe read. */
+    dup2(p[0], STDIN_FILENO);
+    int right_pid = exec(right);
+    dup2(saved_in, STDIN_FILENO);
+    close(saved_in);
+    close(p[0]);
+
+    if (left_pid  > 0) waitpid(left_pid);   /* left exit → write_vnode refs → 0 → EOF */
+    if (right_pid > 0) waitpid(right_pid);
+}
+
 /* ── built-in commands ───────────────────────────────────────────────────── */
 
 static void cmd_help(void) {
@@ -214,6 +271,7 @@ static void cmd_help(void) {
     puts("  run  <path>     spawn and wait");
     puts("  rm   <path>     remove file");
     puts("  pid             print our PID");
+    puts("  /path | /path   pipe two programs");
     puts("Keys:");
     puts("  Up/Down         history navigation");
     puts("  Tab             path completion");
@@ -282,7 +340,18 @@ int main(void) {
     for (;;) {
         write(STDOUT_FILENO, "sh> ", 4);
         if (readline(line, sizeof(line)) == 0) continue;
-        hist_add(line);   /* before split_arg modifies line in-place */
+        hist_add(line);
+
+        /* Check for pipeline before modifying line. */
+        char *pipe_pos = NULL;
+        for (int i = 0; line[i]; i++) {
+            if (line[i] == '|') { pipe_pos = &line[i]; break; }
+        }
+        if (pipe_pos) {
+            *pipe_pos = '\0';
+            execute_pipeline(line, pipe_pos + 1);
+            continue;
+        }
 
         char *arg = split_arg(line);
         const char *cmd = line;

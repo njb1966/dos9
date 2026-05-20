@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <kheap.h>
 #include <elf.h>
+#include <pipe.h>
 
 extern void isr128(void);
 
@@ -137,6 +138,25 @@ static int32_t sys_unlink(const char *path) {
     return vfs_unlink(path);
 }
 
+/* sys_pipe — create an anonymous pipe; fds_user[0]=read, fds_user[1]=write. */
+static int32_t sys_pipe(int32_t *fds_user) {
+    int fds[2];
+    if (pipe_create(fds) < 0) return -1;
+    fds_user[0] = fds[0];
+    fds_user[1] = fds[1];
+    return 0;
+}
+
+/* sys_dup — duplicate fd to next free slot. */
+static int32_t sys_dup(int32_t oldfd) {
+    return (int32_t)vfs_dup((int)oldfd);
+}
+
+/* sys_dup2 — duplicate oldfd to newfd. */
+static int32_t sys_dup2(int32_t oldfd, int32_t newfd) {
+    return (int32_t)vfs_dup2((int)oldfd, (int)newfd);
+}
+
 /*
  * sys_waitpid — block until the target process is PROC_DEAD or gone.
  * Returns 0 on success, -1 if pid never existed.
@@ -178,6 +198,9 @@ void syscall_handler(struct registers *r) {
                                         r->edx, r->esi);                          break;
     case SYS_UNLINK:  ret = sys_unlink ((const char *)r->ebx);                    break;
     case SYS_WAITPID: ret = sys_waitpid((int32_t)r->ebx);                         break;
+    case SYS_PIPE:    ret = sys_pipe   ((int32_t *)r->ebx);                        break;
+    case SYS_DUP:     ret = sys_dup    ((int32_t)r->ebx);                          break;
+    case SYS_DUP2:    ret = sys_dup2   ((int32_t)r->ebx, (int32_t)r->ecx);        break;
     }
     r->eax = (uint32_t)ret;
 }

@@ -158,10 +158,20 @@ static int fd_alloc(file_t *table, vnode_t *v, int flags) {
             table[i].offset = 0;
             table[i].flags  = flags;
             table[i].open   = 1;
+            v->refs++;
             return i;
         }
     }
     return -1;
+}
+
+/* Release one reference to f's vnode; call ops->close only when refs hits 0. */
+static void fd_release(file_t *f) {
+    if (!f->open || !f->vnode) return;
+    if (f->vnode->refs > 0) f->vnode->refs--;
+    if (f->vnode->refs == 0 && f->vnode->ops && f->vnode->ops->close)
+        f->vnode->ops->close(f->vnode);
+    f->open = 0;
 }
 
 /* ── public API ──────────────────────────────────────────────────────── */
@@ -218,10 +228,37 @@ int vfs_close(int fd) {
     if (fd < 0 || fd >= MAX_FDS) return -1;
     file_t *f = &process_current_fds()[fd];
     if (!f->open) return -1;
-    if (f->vnode->ops && f->vnode->ops->close)
-        f->vnode->ops->close(f->vnode);
-    f->open = 0;
+    fd_release(f);
     return 0;
+}
+
+int vfs_dup(int oldfd) {
+    file_t *fds = process_current_fds();
+    if (oldfd < 0 || oldfd >= MAX_FDS || !fds[oldfd].open) return -1;
+    for (int i = 0; i < MAX_FDS; i++) {
+        if (!fds[i].open) {
+            fds[i] = fds[oldfd];
+            fds[i].vnode->refs++;
+            return i;
+        }
+    }
+    return -1;
+}
+
+int vfs_dup2(int oldfd, int newfd) {
+    file_t *fds = process_current_fds();
+    if (oldfd < 0 || oldfd >= MAX_FDS || !fds[oldfd].open) return -1;
+    if (newfd < 0 || newfd >= MAX_FDS) return -1;
+    if (oldfd == newfd) return newfd;
+    if (fds[newfd].open) fd_release(&fds[newfd]);
+    fds[newfd] = fds[oldfd];
+    fds[newfd].vnode->refs++;
+    return newfd;
+}
+
+int vfs_open_vnode(vnode_t *v, int flags) {
+    if (!v) return -1;
+    return fd_alloc(process_current_fds(), v, flags);
 }
 
 int vfs_lseek(int fd, int32_t offset, int whence) {
@@ -277,14 +314,14 @@ int vfs_unlink(const char *path) {
 void vfs_close_table(file_t *table) {
     for (int i = 0; i < MAX_FDS; i++) {
         if (!table[i].open) continue;
-        if (table[i].vnode && table[i].vnode->ops && table[i].vnode->ops->close)
-            table[i].vnode->ops->close(table[i].vnode);
-        table[i].open = 0;
+        fd_release(&table[i]);
     }
 }
 
 void vfs_inherit_stdio(const file_t *src, file_t *dst) {
-    /* Copy only fds 0-2 (stdin, stdout, stderr). */
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 3; i++) {
         dst[i] = src[i];
+        if (src[i].open && src[i].vnode)
+            src[i].vnode->refs++;   /* child holds a new reference */
+    }
 }
