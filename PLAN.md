@@ -207,6 +207,13 @@ This is the emotional hardest phase. It looks like nothing. It is the foundation
 - `sys_exec` reads entire ELF into kernel heap before loading. Future: fd-based streaming loader eliminates the buffer.
 - Process table is fixed at 8 slots. Increase when user workloads grow.
 - No `write()` syscall to disk (DOS9FS is read-only from user space). Needed before package system.
+- **Pipe EOF via `refs`**: `wv->refs == 0` works for the current single-fd-per-end use, but `refs` counts fd-table slots, not writers. `dup(write_fd)` inflates refs without adding a writer; a read-end `dup` prevents EOF. Acceptable for current usage; revisit if pipelines become more complex.
+- **`sys_waitpid` slot recycling**: if a child's slot is recycled before `waitpid` is called, the return value is 0 (slot gone = treat as success). `if run /prog` may silently miss failure in this edge case.
+- **`block_collect` line limit**: silently drops lines beyond 64; `malloc` failures in block collection also drop lines silently. Both should emit an error.
+- **`g_break` and nested loops**: `break` only exits the immediately enclosing loop. A `break` inside an inner `for` inside an outer `loop` is consumed by the `for`. This is intentional but differs from most languages.
+- **Variable expansion truncation**: `expand_vars` output is capped at 256 bytes. Expansions that exceed this are silently truncated.
+- **Scripting recursion depth**: `eval_line` → `cmd_if` → `eval_block` → `eval_line` consumes ~512 bytes of user stack per level. With a 16KB user stack, depth is capped around 20–25 before silent stack corruption. Adequate for practical scripts.
+- **`vfs_close_table` / `process_kill` gap**: `process_kill` sets `PROC_DEAD` but defers fd cleanup to slot recycling. Killed processes hold vnode refs until their slot is reused.
 
 ### Phase 4 — Small web citizenship
 

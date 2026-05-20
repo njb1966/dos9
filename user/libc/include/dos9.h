@@ -112,7 +112,7 @@ static inline int unlink(const char *path) {
     return (int)_syscall1(SYS_UNLINK, (int32_t)(uintptr_t)path);
 }
 
-/* waitpid — block until pid exits; returns 0, -1 on error. */
+/* waitpid — block until pid exits; returns child's exit code, -1 on error. */
 static inline int waitpid(int pid) {
     return (int)_syscall1(SYS_WAITPID, (int32_t)pid);
 }

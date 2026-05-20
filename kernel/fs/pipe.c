@@ -9,8 +9,9 @@
 
 typedef struct pipe {
     uint8_t  data[PIPE_BUF];
-    uint32_t head;   /* write index */
-    uint32_t tail;   /* read index  */
+    uint32_t head;       /* write index */
+    uint32_t tail;       /* read index  */
+    uint32_t open_ends;  /* 2 at creation; pipe_t freed when this hits 0 */
 } pipe_t;
 
 /*
@@ -60,8 +61,25 @@ static int pipe_write_op(vnode_t *v, const void *buf, uint32_t off, uint32_t len
     return (int)n;
 }
 
-static fs_ops_t pipe_read_ops  = { .read  = pipe_read_op  };
-static fs_ops_t pipe_write_ops = { .write = pipe_write_op };
+/*
+ * pipe_close_op — called by fd_release when vnode->refs drops to 0.
+ *
+ * Frees this vnode and its priv array.  Decrements the shared open_ends
+ * counter; when it reaches 0 (last end closing), frees the pipe_t buffer.
+ * The peer vnode is freed by its own close call — no cross-vnode access.
+ */
+static int pipe_close_op(vnode_t *v) {
+    void   **priv = (void **)v->priv;
+    pipe_t  *p    = (pipe_t *)priv[0];   /* save before freeing priv */
+    kfree(priv);
+    kfree(v);
+    if (--p->open_ends == 0)
+        kfree(p);
+    return 0;
+}
+
+static fs_ops_t pipe_read_ops  = { .read  = pipe_read_op,  .close = pipe_close_op };
+static fs_ops_t pipe_write_ops = { .write = pipe_write_op, .close = pipe_close_op };
 
 int pipe_create(int fds[2]) {
     pipe_t  *p  = (pipe_t *)kmalloc(sizeof(pipe_t));
@@ -82,6 +100,7 @@ int pipe_create(int fds[2]) {
     memset(p,  0, sizeof(pipe_t));
     memset(rv, 0, sizeof(vnode_t));
     memset(wv, 0, sizeof(vnode_t));
+    p->open_ends = 2;
 
     /* Read vnode: can read, checks write_vnode->refs for EOF. */
     rp[0] = p;  rp[1] = wv;
