@@ -13,7 +13,6 @@ static int  hist_next  = 0;   /* next write slot (circular) */
 
 static void hist_add(const char *line) {
     if (!line[0]) return;
-    /* Skip exact duplicate of the most recent entry. */
     if (hist_count > 0) {
         int prev = (hist_next - 1 + HIST_SIZE) % HIST_SIZE;
         if (strcmp(hist_buf[prev], line) == 0) return;
@@ -23,7 +22,7 @@ static void hist_add(const char *line) {
     if (hist_count < HIST_SIZE) hist_count++;
 }
 
-/* pos: 0 = oldest entry, hist_count-1 = newest entry. */
+/* pos: 0 = oldest entry, hist_count-1 = newest. */
 static const char *hist_get(int pos) {
     if (pos < 0 || pos >= hist_count) return NULL;
     int idx = (hist_next - hist_count + pos + HIST_SIZE * 2) % HIST_SIZE;
@@ -46,15 +45,13 @@ static void erase_chars(int n) {
 static void complete(char *buf, int *lenp, int max) {
     buf[*lenp] = '\0';
 
-    /* Find start of the last word in the buffer. */
     int ws = *lenp;
     while (ws > 0 && buf[ws - 1] != ' ') ws--;
     char *word    = buf + ws;
     int   wordlen = *lenp - ws;
 
-    /* Split word at the last '/': dir part + prefix after the slash. */
     char dir[PATH_MAX];
-    int  plen      = 0;
+    int  plen       = 0;
     int  last_slash = -1;
     for (int i = 0; i < wordlen; i++)
         if (word[i] == '/') last_slash = i;
@@ -66,7 +63,6 @@ static void complete(char *buf, int *lenp, int max) {
         dir[dlen] = '\0';
         plen = wordlen - dlen;
     } else {
-        /* No slash: complete against root (useful for /disk/ listings). */
         dir[0] = '/'; dir[1] = '\0';
         plen = wordlen;
     }
@@ -91,7 +87,6 @@ static void complete(char *buf, int *lenp, int max) {
     if (nm == 0) return;
 
     if (nm == 1) {
-        /* Unique match — append the suffix directly. */
         int mlen = (int)strlen(matches[0]);
         for (int i = plen; i < mlen && *lenp < max - 1; i++) {
             char ch = matches[0][i];
@@ -101,7 +96,6 @@ static void complete(char *buf, int *lenp, int max) {
         return;
     }
 
-    /* Multiple matches — list them, then redraw the prompt + current input. */
     write(STDOUT_FILENO, "\n", 1);
     for (int i = 0; i < nm && i < 8; i++) {
         write(STDOUT_FILENO, matches[i], strlen(matches[i]));
@@ -118,7 +112,7 @@ static void complete(char *buf, int *lenp, int max) {
 
 static int readline(char *buf, int max) {
     int  len      = 0;
-    int  hist_pos = hist_count;   /* past-end index = "current unsaved line" */
+    int  hist_pos = hist_count;
     char saved[LINE_MAX];
     saved[0] = '\0';
     buf[0]   = '\0';
@@ -132,24 +126,23 @@ static int readline(char *buf, int max) {
             break;
         }
 
-        /* ESC [ x — ANSI cursor key sequence from the keyboard driver. */
         if (c == '\x1b') {
             char seq[2];
             if (read(STDIN_FILENO, &seq[0], 1) != 1) continue;
             if (seq[0] != '[')                        continue;
             if (read(STDIN_FILENO, &seq[1], 1) != 1) continue;
 
-            if (seq[1] != 'A' && seq[1] != 'B') continue;  /* ignore left/right */
+            if (seq[1] != 'A' && seq[1] != 'B') continue;
 
             int target;
-            if (seq[1] == 'A') {   /* up — older entry */
+            if (seq[1] == 'A') {
                 if (hist_pos == 0) continue;
                 if (hist_pos == hist_count) {
                     buf[len] = '\0';
                     strcpy(saved, buf);
                 }
                 target = hist_pos - 1;
-            } else {               /* down — newer entry */
+            } else {
                 if (hist_pos == hist_count) continue;
                 target = hist_pos + 1;
             }
@@ -166,15 +159,13 @@ static int readline(char *buf, int max) {
             continue;
         }
 
-        /* Tab — path completion. */
         if (c == '\t') {
             buf[len] = '\0';
             complete(buf, &len, max);
-            hist_pos = hist_count;   /* reset history position after completion */
+            hist_pos = hist_count;
             continue;
         }
 
-        /* Backspace / DEL. */
         if ((c == '\b' || c == 127) && len > 0) {
             len--;
             write(STDOUT_FILENO, "\b", 1);
@@ -204,21 +195,7 @@ static char *split_arg(char *buf) {
 
 /* ── pipeline ────────────────────────────────────────────────────────────── */
 
-/*
- * Execute left_path | right_path as two concurrent processes connected
- * by an anonymous pipe.  Both sides must be paths to ELF programs.
- *
- * Protocol (ensures correct EOF delivery via vnode refcounting):
- *   1. Create pipe: fds p[0]=read, p[1]=write.
- *   2. dup2 p[1] → STDOUT; exec left (inherits pipe-write at fd 1); restore STDOUT.
- *   3. Shell closes p[1] — only left child now holds the write end.
- *   4. dup2 p[0] → STDIN;  exec right (inherits pipe-read  at fd 0); restore STDIN.
- *   5. Shell closes p[0].
- *   6. waitpid(left) — when left exits, write_vnode->refs → 0 → reader sees EOF.
- *   7. waitpid(right).
- */
 static void execute_pipeline(char *left, char *right) {
-    /* Trim leading/trailing spaces. */
     while (*left  == ' ') left++;
     while (*right == ' ') right++;
     int ll = (int)strlen(left);
@@ -241,48 +218,47 @@ static void execute_pipeline(char *left, char *right) {
         return;
     }
 
-    /* Left side: stdout → pipe write. */
+    /* Left side: stdout -> pipe write. */
     dup2(p[1], STDOUT_FILENO);
     int left_pid = exec(left);
     dup2(saved_out, STDOUT_FILENO);
     close(saved_out);
     close(p[1]);   /* shell drops write ref — only left child holds it now */
 
-    /* Right side: stdin ← pipe read. */
+    /* Right side: stdin <- pipe read. */
     dup2(p[0], STDIN_FILENO);
     int right_pid = exec(right);
     dup2(saved_in, STDIN_FILENO);
     close(saved_in);
     close(p[0]);
 
-    if (left_pid  > 0) waitpid(left_pid);   /* left exit → write_vnode refs → 0 → EOF */
+    if (left_pid  > 0) waitpid(left_pid);
     if (right_pid > 0) waitpid(right_pid);
 }
 
 /* ── built-in commands ───────────────────────────────────────────────────── */
 
-static void cmd_help(void) {
-    puts("Commands:");
-    puts("  help            this message");
-    puts("  echo <text>     print text");
-    puts("  ls [path]       list directory");
-    puts("  cat <path>      print file");
-    puts("  exec <path>     spawn program (async)");
-    puts("  run  <path>     spawn and wait");
-    puts("  rm   <path>     remove file");
-    puts("  pid             print our PID");
-    puts("  /path | /path   pipe two programs");
-    puts("Keys:");
-    puts("  Up/Down         history navigation");
-    puts("  Tab             path completion");
-}
+/* Forward declaration — cmd_help is defined after the command table. */
+static void cmd_help(const char *arg);
+
+#define IS_HELP(a) ((a) && strcmp((a), "--help") == 0)
 
 static void cmd_echo(const char *arg) {
+    if (IS_HELP(arg)) {
+        puts("usage: echo <text>");
+        puts("  write text to stdout followed by a newline");
+        return;
+    }
     if (arg) puts(arg);
     else     write(STDOUT_FILENO, "\n", 1);
 }
 
 static void cmd_ls(const char *path) {
+    if (IS_HELP(path)) {
+        puts("usage: ls [path]");
+        puts("  list directory entries (default path: /)");
+        return;
+    }
     if (!path || !*path) path = "/";
     int fd = open(path, O_RDONLY);
     if (fd < 0) { puts("ls: open failed"); return; }
@@ -297,6 +273,11 @@ static void cmd_ls(const char *path) {
 }
 
 static void cmd_cat(const char *path) {
+    if (IS_HELP(path)) {
+        puts("usage: cat <path>");
+        puts("  print file to stdout");
+        return;
+    }
     if (!path || !*path) { puts("cat: missing path"); return; }
     int fd = open(path, O_RDONLY);
     if (fd < 0) { puts("cat: open failed"); return; }
@@ -309,6 +290,11 @@ static void cmd_cat(const char *path) {
 }
 
 static void cmd_exec(const char *path) {
+    if (IS_HELP(path)) {
+        puts("usage: exec <path>");
+        puts("  spawn a program and return immediately (async)");
+        return;
+    }
     if (!path || !*path) { puts("exec: missing path"); return; }
     int pid = exec(path);
     if (pid < 0) puts("exec: failed");
@@ -316,6 +302,11 @@ static void cmd_exec(const char *path) {
 }
 
 static void cmd_run(const char *path) {
+    if (IS_HELP(path)) {
+        puts("usage: run <path>");
+        puts("  spawn a program and wait for it to exit");
+        return;
+    }
     if (!path || !*path) { puts("run: missing path"); return; }
     int pid = exec(path);
     if (pid < 0) { puts("run: exec failed"); return; }
@@ -323,12 +314,82 @@ static void cmd_run(const char *path) {
 }
 
 static void cmd_rm(const char *path) {
+    if (IS_HELP(path)) {
+        puts("usage: rm <path>");
+        puts("  remove a file; rm /proc/<pid> kills a process");
+        return;
+    }
     if (!path || !*path) { puts("rm: missing path"); return; }
     if (unlink(path) < 0) puts("rm: failed");
 }
 
-static void cmd_pid(void) {
+static void cmd_pid(const char *arg) {
+    if (IS_HELP(arg)) {
+        puts("usage: pid");
+        puts("  print the process ID of this shell");
+        return;
+    }
     printf("  pid: %d\n", getpid());
+}
+
+/* ── command table ───────────────────────────────────────────────────────── */
+
+typedef void (*cmd_fn_t)(const char *);
+
+typedef struct {
+    const char *name;
+    cmd_fn_t    fn;
+    const char *usage;
+    const char *desc;
+} cmd_entry_t;
+
+static const cmd_entry_t cmds[] = {
+    { "help", cmd_help, "help [cmd]",    "list commands, or describe one"  },
+    { "echo", cmd_echo, "echo <text>",   "write text to stdout"            },
+    { "ls",   cmd_ls,   "ls [path]",     "list directory"                  },
+    { "cat",  cmd_cat,  "cat <path>",    "print file to stdout"            },
+    { "exec", cmd_exec, "exec <path>",   "spawn program (no wait)"         },
+    { "run",  cmd_run,  "run <path>",    "spawn and wait for exit"         },
+    { "rm",   cmd_rm,   "rm <path>",     "remove file (or kill /proc/pid)" },
+    { "pid",  cmd_pid,  "pid",           "print our process ID"            },
+    { NULL,   NULL,     NULL,            NULL                              },
+};
+
+/* ── help ────────────────────────────────────────────────────────────────── */
+
+static void cmd_help(const char *arg) {
+    if (arg && *arg) {
+        if (strcmp(arg, "--help") == 0) {
+            puts("usage: help [cmd]");
+            puts("  list all built-in commands, or describe one");
+            return;
+        }
+        for (int i = 0; cmds[i].name; i++) {
+            if (strcmp(cmds[i].name, arg) == 0) {
+                /* usage line then description */
+                puts(cmds[i].usage);
+                puts(cmds[i].desc);
+                return;
+            }
+        }
+        puts("sh: help: unknown command");
+        return;
+    }
+
+    puts("Commands:");
+    for (int i = 0; cmds[i].name; i++) {
+        write(STDOUT_FILENO, "  ", 2);
+        int ulen = (int)strlen(cmds[i].usage);
+        write(STDOUT_FILENO, cmds[i].usage, (size_t)ulen);
+        /* pad usage column to 16 chars */
+        for (int p = ulen; p < 16; p++) write(STDOUT_FILENO, " ", 1);
+        puts(cmds[i].desc);
+    }
+    puts("Keys:");
+    puts("  Up/Down         history navigation");
+    puts("  Tab             path completion");
+    puts("Syntax:");
+    puts("  left | right    pipeline (external programs only)");
 }
 
 /* ── main loop ───────────────────────────────────────────────────────────── */
@@ -356,14 +417,14 @@ int main(void) {
         char *arg = split_arg(line);
         const char *cmd = line;
 
-        if      (strcmp(cmd, "help") == 0) cmd_help();
-        else if (strcmp(cmd, "echo") == 0) cmd_echo(arg);
-        else if (strcmp(cmd, "ls")   == 0) cmd_ls(arg);
-        else if (strcmp(cmd, "cat")  == 0) cmd_cat(arg);
-        else if (strcmp(cmd, "exec") == 0) cmd_exec(arg);
-        else if (strcmp(cmd, "run")  == 0) cmd_run(arg);
-        else if (strcmp(cmd, "rm")   == 0) cmd_rm(arg);
-        else if (strcmp(cmd, "pid")  == 0) cmd_pid();
-        else puts("sh: unknown command");
+        int found = 0;
+        for (int i = 0; cmds[i].name; i++) {
+            if (strcmp(cmd, cmds[i].name) == 0) {
+                cmds[i].fn(arg);
+                found = 1;
+                break;
+            }
+        }
+        if (!found) puts("sh: unknown command");
     }
 }
