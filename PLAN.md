@@ -184,12 +184,12 @@ This is the emotional hardest phase. It looks like nothing. It is the foundation
 - [x] `_syscall4` (esi as 4th arg) in user libc.
 - [x] `user/sh.c` — ring-3 shell: readline with echo/backspace, echo/ls/cat/exec/run/rm/pid commands.
 - [x] `sh.elf` on disk; boot sequence: `DOS/9> exec /disk/sh` → `sh>`.
+- [x] **Auto-launch sh at boot** — `kernel_main` calls `shell_exec_user("/disk/sh")` after diskfs init, then waits in `schedule()` loop until sh exits; falls back to `DOS/9>` prompt. Keyboard exclusively owned by sh while running.
+- [x] **Arrow keys in keyboard driver** — 0xE0 extended prefix handled; up/down/left/right translated to ANSI CSI sequences (ESC [ A/B/C/D) in the ring buffer. (`kernel/drivers/keyboard.c`)
+- [x] **Shell: command history** — 32-entry circular buffer; up/down arrows cycle entries; saves current partial line when browsing, restores on down past newest; skips consecutive duplicates. (`user/sh.c`)
+- [x] **Shell: tab completion** — splits last word at '/'; opens parent dir via VFS readdir; unique match appended in-place; multiple matches listed with prompt redraw. (`user/sh.c`)
 
 #### Phase 3 remaining
-
-- [ ] **Auto-launch sh at boot** — kernel shell auto-execs `/disk/sh` if present; falls back to `DOS/9>` prompt if not found.
-- [ ] **Shell: tab completion** — complete paths against VFS (opens dir, iterates readdir matches).
-- [ ] **Shell: command history** — up/down arrows cycle through previous lines (circular buffer).
 - [ ] **Shell: structured pipes** — typed records between commands, not raw byte streams. Design TBD.
 - [ ] **Shell: scripting** — minimal scripting language (variables, conditionals, loops). Not sh-compatible; DOS/9-native.
 - [ ] **Shell: inline help** — every built-in has a `--help` response; `help <cmd>` works from the prompt.
