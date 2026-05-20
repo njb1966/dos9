@@ -195,8 +195,8 @@ This is the emotional hardest phase. It looks like nothing. It is the foundation
 
 #### Phase 3 remaining
 - [ ] **Shell: structured pipes** — currently byte-stream; typed record framing deferred until built-in piping is solved (needs fork or in-process concurrency).
-- [ ] **Shell: scripting** — minimal scripting language (variables, conditionals, loops). Not sh-compatible; DOS/9-native.
-- [ ] **Shell: inline help** — every built-in has a `--help` response; `help <cmd>` works from the prompt.
+- [x] **Shell: scripting** — variables (`set`/`unset`/`env`, `$expansion`), `if <cmd> ... end` (condition runs immediately, block executes if exit 0), `for name in words ... end`, `loop ... end` with `break`; `true`/`false` built-ins. Kernel: `process_t.exit_code` + `sys_waitpid` returns child exit code. (`user/sh.c`, `kernel/proc/process.c`, `kernel/arch/i386/syscall.c`)
+- [x] **Shell: inline help** — `--help` on every built-in; `help <cmd>` looks up usage+desc from `cmd_entry_t` table; table-driven dispatch replaces dispatch chain. (`user/sh.c`)
 - [ ] **TUI toolkit** — consistent widget library: menus, dialogs, borders, color schemes, F-key bindings. Turbo Vision lineage. Required by file manager and editor.
 - [ ] **File manager** — Norton Commander-style, two panes, F-key actions, fast keyboard navigation. Built on TUI toolkit.
 - [ ] **Text editor** — `EDIT.COM`'s spiritual descendant. Full-screen, no modal nonsense, built on TUI toolkit.
