@@ -28,6 +28,7 @@ typedef struct process {
     uint32_t    user_stack;     /* offset 40 — user-space ESP for ring-3 iret */
     uint32_t    brk;            /* user-space heap break (sbrk base); 0 for kernel threads */
     file_t      fds[MAX_FDS];   /* per-process file descriptor table */
+    int32_t     exit_code;      /* exit status set by sys_exit(); read by waitpid */
 } process_t;
 
 void       process_init(void);
@@ -35,7 +36,7 @@ process_t *process_create(void (*entry)(void), const char *name);
 process_t *process_create_user(uint32_t entry_vaddr, const char *name,
                                 uint32_t pd_phys);
 void       schedule(void);
-void       process_exit(void);
+void       process_exit(int32_t code);
 int        process_count(void);
 process_t *process_get(int idx);
 int        process_kill(uint32_t pid);

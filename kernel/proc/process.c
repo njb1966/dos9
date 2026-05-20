@@ -52,6 +52,7 @@ static void proc_trampoline(void) {
     __asm__ volatile("sti");    /* re-enable IRQs — CPU cleared IF on interrupt entry */
     fn();
 
+    self->exit_code = 0;
     self->state = PROC_DEAD;
     for (;;) schedule();        /* yield forever if entry returns */
 }
@@ -137,19 +138,21 @@ process_t *process_create(void (*entry)(void), const char *name) {
     p->esp      = (uint32_t)top;
     p->page_dir = get_cr3();
     p->pid      = next_pid++;
-    p->state    = PROC_READY;
+    p->state     = PROC_READY;
     name_copy(p->name, name);
-    p->entry    = entry;
-    p->stack    = stk;
-    p->brk      = 0;
+    p->entry     = entry;
+    p->stack     = stk;
+    p->brk       = 0;
+    p->exit_code = 0;
     memset(p->fds, 0, sizeof(p->fds));
 
     proc_table[slot] = p;
     return p;
 }
 
-void process_exit(void) {
+void process_exit(int32_t code) {
     vfs_close_table(proc_table[cur]->fds);
+    proc_table[cur]->exit_code = code;
     proc_table[cur]->state = PROC_DEAD;
     for (;;) schedule();
 }
@@ -235,6 +238,7 @@ process_t *process_create_user(uint32_t entry_vaddr, const char *name,
     p->stack      = stk;
     p->user_stack = USER_STACK_TOP;
     p->brk        = 0;     /* set by cmd_exec after elf_load() returns brk_out */
+    p->exit_code  = 0;
     memset(p->fds, 0, sizeof(p->fds));
     vfs_inherit_stdio(proc_table[cur]->fds, p->fds);
 

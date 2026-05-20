@@ -19,8 +19,7 @@ extern void isr128(void);
 /* ── syscall implementations ─────────────────────────────────────────── */
 
 static int32_t sys_exit(int32_t code) {
-    (void)code;
-    process_exit();
+    process_exit(code);
     __builtin_unreachable();
 }
 
@@ -170,11 +169,11 @@ static int32_t sys_waitpid(int32_t pid) {
             if (!p) continue;
             if ((int32_t)p->pid == pid) {
                 found = 1;
-                if (p->state == PROC_DEAD) return 0;
+                if (p->state == PROC_DEAD) return p->exit_code;
                 break;
             }
         }
-        if (!found) return 0;   /* already gone */
+        if (!found) return 0;   /* already gone — treat as success */
         schedule();
     }
 }
