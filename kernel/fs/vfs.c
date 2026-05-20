@@ -193,7 +193,25 @@ void vfs_open_stdio(void) {
 
 int vfs_open(const char *path, int flags) {
     vnode_t *v = vfs_lookup(path);
-    if (!v) return -1;
+    if (!v) {
+        if (!(flags & O_CREAT)) return -1;
+        /* Find parent dir and basename, then call create. */
+        const char *last = path;
+        for (const char *p = path; *p; p++) if (*p == '/') last = p;
+        if (!last[1]) return -1;
+        char parent[64];
+        uint32_t plen = (uint32_t)(last - path);
+        if (plen == 0) { parent[0] = '/'; parent[1] = '\0'; }
+        else {
+            if (plen >= 64u) return -1;
+            for (uint32_t i = 0; i < plen; i++) parent[i] = path[i];
+            parent[plen] = '\0';
+        }
+        vnode_t *dir = vfs_lookup(parent);
+        if (!dir || !dir->ops || !dir->ops->create) return -1;
+        v = dir->ops->create(dir, last + 1);
+        if (!v) return -1;
+    }
 
     if (v->ops && v->ops->open) {
         int r = v->ops->open(v, flags);

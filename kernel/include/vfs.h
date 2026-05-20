@@ -5,6 +5,7 @@
 #define O_RDONLY  0
 #define O_WRONLY  1
 #define O_RDWR    2
+#define O_CREAT   4
 
 /* vnode types */
 #define VTYPE_FILE 0
@@ -28,6 +29,8 @@ typedef struct fs_ops {
     /* Remove a name from a directory.  Synthetic FSes may use this for
        side effects (e.g. /proc unlink kills the process). */
     int            (*unlink)(struct vnode *dir, const char *name);
+    /* Create a new file in a directory; returns its vnode, or NULL on error. */
+    struct vnode * (*create)(struct vnode *dir, const char *name);
 } fs_ops_t;
 
 typedef struct vnode {

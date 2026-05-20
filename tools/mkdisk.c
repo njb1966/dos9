@@ -35,7 +35,7 @@ typedef struct {
     uint32_t start_lba;
     uint32_t size;
     uint32_t flags;
-    uint8_t  pad[4];
+    uint32_t alloc_sectors;
 } __attribute__((packed)) diskfs_dirent_t;
 
 /* ── helpers ───────────────────────────────────────────────────────────── */
@@ -129,10 +129,11 @@ int main(int argc, char **argv) {
 
         /* Directory entry. */
         strncpy(dir[i].name, disk_name, 15);
-        dir[i].name[15]  = '\0';
-        dir[i].start_lba = next_lba;
-        dir[i].size      = size;
-        dir[i].flags     = DISKFS_FLAG_ACTIVE;
+        dir[i].name[15]      = '\0';
+        dir[i].start_lba     = next_lba;
+        dir[i].size          = size;
+        dir[i].flags         = DISKFS_FLAG_ACTIVE;
+        dir[i].alloc_sectors = n_sects;
 
         printf("  %-15s  lba=%-5u  %u bytes (%u sectors)\n",
                disk_name, next_lba, size, n_sects);

@@ -769,9 +769,14 @@ static int eval_line(char *line) {
 
     /* external path: anything starting with / */
     if (cmd[0] == '/') {
-        int pid = exec(cmd);
+        const char *argv_arr[3];
+        int narg = 1;
+        argv_arr[0] = cmd;
+        if (arg && arg[0]) { argv_arr[1] = arg; narg = 2; }
+        argv_arr[narg] = NULL;
+        int pid = execv(cmd, argv_arr, narg);
         if (pid < 0) { puts("sh: exec failed"); return -1; }
-        return waitpid(pid);   /* returns child's exit code */
+        return waitpid(pid);
     }
 
     puts("sh: unknown command");

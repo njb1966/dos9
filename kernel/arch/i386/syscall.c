@@ -93,9 +93,10 @@ static int32_t sys_brk(int32_t increment) {
 
 /*
  * sys_exec — load and launch a user ELF from a path.
+ * argv: user-space pointer array (ecx), argc: count (edx).
  * Returns the new PID on success, -1 on failure.
  */
-static int32_t sys_exec(const char *path) {
+static int32_t sys_exec(const char *path, const char **argv, int32_t argc) {
     int fd = vfs_open(path, O_RDONLY);
     if (fd < 0) return -1;
 
@@ -121,7 +122,7 @@ static int32_t sys_exec(const char *path) {
     for (const char *p = path; *p; p++)
         if (*p == '/') name = p + 1;
 
-    process_t *p = process_create_user(entry, name, pd_phys);
+    process_t *p = process_create_user(entry, name, pd_phys, argv, (int)argc);
     if (!p) return -1;
     p->brk = brk_start;
     return (int32_t)p->pid;
@@ -192,7 +193,7 @@ void syscall_handler(struct registers *r) {
                                       (int32_t)r->edx);                          break;
     case SYS_GETPID: ret = sys_getpid();                                          break;
     case SYS_BRK:     ret = sys_brk    ((int32_t)r->ebx);                          break;
-    case SYS_EXEC:    ret = sys_exec   ((const char *)r->ebx);                    break;
+    case SYS_EXEC:    ret = sys_exec   ((const char *)r->ebx, (const char **)r->ecx, (int32_t)r->edx); break;
     case SYS_READDIR: ret = sys_readdir((int32_t)r->ebx, (char *)r->ecx,
                                         r->edx, r->esi);                          break;
     case SYS_UNLINK:  ret = sys_unlink ((const char *)r->ebx);                    break;

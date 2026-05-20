@@ -34,7 +34,8 @@ typedef struct process {
 void       process_init(void);
 process_t *process_create(void (*entry)(void), const char *name);
 process_t *process_create_user(uint32_t entry_vaddr, const char *name,
-                                uint32_t pd_phys);
+                                uint32_t pd_phys,
+                                const char **argv, int argc);
 void       schedule(void);
 void       process_exit(int32_t code);
 int        process_count(void);

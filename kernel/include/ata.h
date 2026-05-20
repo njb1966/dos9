@@ -12,3 +12,7 @@ int ata_present(void);
 /* Read one 512-byte sector at LBA `lba` into `buf` (must be ≥ 512 bytes).
    Returns 0 on success, -1 on error. */
 int ata_read_sector(uint32_t lba, void *buf);
+
+/* Write one 512-byte sector at LBA `lba` from `buf` (must be ≥ 512 bytes).
+   Returns 0 on success, -1 on error. */
+int ata_write_sector(uint32_t lba, const void *buf);

@@ -204,21 +204,95 @@ void schedule(void) {
     context_switch(prev, nxt);
 }
 
+/*
+ * write_user_argv — write argc/argv to the topmost user stack page.
+ *
+ * frame_data: kernel pointer to the physical frame of the topmost stack page
+ *             (user virtual base: USER_STACK_TOP - PAGE_SIZE = 0xBFFE0000)
+ * Returns the user-space virtual address of the argc slot (new esp),
+ * or 0 on failure.
+ */
+static uint32_t write_user_argv(uint8_t *frame_data,
+                                 const char **argv, int argc) {
+    if (!frame_data || argc <= 0 || !argv) return 0;
+    if (argc > 8) argc = 8;
+
+    uint32_t off = PAGE_SIZE;  /* grows downward */
+
+    uint32_t str_off[8];
+    uint32_t page_ubase = USER_STACK_TOP - PAGE_SIZE;  /* 0xBFFE0000 */
+
+    /* Write strings high→low (last arg first). */
+    for (int i = argc - 1; i >= 0; i--) {
+        const char *s = (argv[i] && argv[i][0]) ? argv[i] : "";
+        uint32_t len = 0;
+        while (s[len]) len++;
+        len++;                      /* include NUL */
+        if (len > 128) len = 128;
+        if (off < len) return 0;
+        off -= len;
+        for (uint32_t j = 0; j < len - 1; j++)
+            frame_data[off + j] = (uint8_t)s[j];
+        frame_data[off + len - 1] = 0;
+        str_off[i] = off;
+    }
+
+    off &= ~3u;  /* align to 4 bytes */
+
+    /* NULL sentinel. */
+    if (off < 4) return 0;
+    off -= 4;
+    *(uint32_t *)(frame_data + off) = 0;
+
+    /* argv pointer array (last → first, so argv[0] lands lowest). */
+    for (int i = argc - 1; i >= 0; i--) {
+        if (off < 4) return 0;
+        off -= 4;
+        *(uint32_t *)(frame_data + off) = page_ubase + str_off[i];
+    }
+
+    /* argc. */
+    if (off < 4) return 0;
+    off -= 4;
+    *(uint32_t *)(frame_data + off) = (uint32_t)argc;
+
+    return page_ubase + off;
+}
+
 process_t *process_create_user(uint32_t entry_vaddr, const char *name,
-                                uint32_t pd_phys) {
+                                uint32_t pd_phys,
+                                const char **argv, int argc) {
     int slot = proc_alloc_slot();
     if (slot < 0) return NULL;
 
     process_t *p   = kmalloc(sizeof(process_t));
     uint8_t   *stk = kmalloc(KSTACK_SIZE);
 
-    /* Allocate and map user-space stack pages in the user page directory. */
+    /* Allocate and map user-space stack pages; save topmost frame pointer. */
+    uint8_t *top_frame_kptr = NULL;
     for (uint32_t i = 0; i < USER_STACK_PAGES; i++) {
         uint32_t vaddr = USER_STACK_TOP - (USER_STACK_PAGES - i) * PAGE_SIZE;
         uint32_t frame = (uint32_t)pmm_alloc_frame();
         memset((void *)VIRT(frame), 0, PAGE_SIZE);
         vmm_map_page_in(pd_phys, vaddr, frame,
                         PF_PRESENT | PF_WRITE | PF_USER);
+        if (i == USER_STACK_PAGES - 1)
+            top_frame_kptr = (uint8_t *)VIRT(frame);
+    }
+
+    /* Always set up at least argc=1, argv[0]=name. */
+    uint32_t user_esp = USER_STACK_TOP;
+    if (top_frame_kptr) {
+        const char *synth_argv[1];
+        int synth_argc = argc;
+        const char **use_argv = argv;
+        if (synth_argc <= 0 || !use_argv) {
+            synth_argv[0] = name;
+            use_argv = synth_argv;
+            synth_argc = 1;
+        }
+        uint32_t esp = write_user_argv(top_frame_kptr, use_argv, synth_argc);
+        if (esp) user_esp = esp;
     }
 
     /* Build kernel stack fake frame: ret → user_trampoline. */
@@ -236,8 +310,8 @@ process_t *process_create_user(uint32_t entry_vaddr, const char *name,
     name_copy(p->name, name);
     p->entry      = (void (*)(void))(uintptr_t)entry_vaddr;
     p->stack      = stk;
-    p->user_stack = USER_STACK_TOP;
-    p->brk        = 0;     /* set by cmd_exec after elf_load() returns brk_out */
+    p->user_stack = user_esp;
+    p->brk        = 0;
     p->exit_code  = 0;
     memset(p->fds, 0, sizeof(p->fds));
     vfs_inherit_stdio(proc_table[cur]->fds, p->fds);

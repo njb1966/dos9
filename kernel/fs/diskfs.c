@@ -15,6 +15,20 @@ static uint32_t        n_active = 0;
 /* One vnode per directory slot (used only for active entries). */
 static vnode_t file_vnodes[DISKFS_MAX_FILES];
 
+/* LBA after last allocated file data. */
+static uint32_t next_free_lba;
+
+/* ── directory flush ───────────────────────────────────────────────────── */
+
+static void diskfs_flush_dir(void) {
+    uint8_t dir_buf[SECTOR_SIZE];
+    for (int s = 0; s < 4; s++) {
+        memset(dir_buf, 0, SECTOR_SIZE);
+        memcpy(dir_buf, &dir[s * 16], 16 * sizeof(diskfs_dirent_t));
+        ata_write_sector(DISKFS_DIR_START + (uint32_t)s, dir_buf);
+    }
+}
+
 /* ── file read ─────────────────────────────────────────────────────────── */
 
 static int diskfile_read(vnode_t *v, void *buf, uint32_t off, uint32_t len) {
@@ -45,7 +59,55 @@ static int diskfile_read(vnode_t *v, void *buf, uint32_t off, uint32_t len) {
     return (int)len;
 }
 
-static fs_ops_t diskfile_ops = { .read = diskfile_read };
+/* ── file write ────────────────────────────────────────────────────────── */
+
+static int diskfile_write(vnode_t *v, const void *buf,
+                           uint32_t off, uint32_t len) {
+    diskfs_dirent_t *de = (diskfs_dirent_t *)v->priv;
+    uint32_t max_bytes  = de->alloc_sectors * SECTOR_SIZE;
+
+    if (off >= max_bytes) return 0;
+    if (off + len > max_bytes) len = max_bytes - off;
+    if (len == 0) return 0;
+
+    const uint8_t *src  = (const uint8_t *)buf;
+    uint32_t remaining  = len;
+    uint32_t cur_off    = off;
+    uint8_t  sector_buf[SECTOR_SIZE];
+
+    while (remaining > 0) {
+        uint32_t sector_idx = cur_off / SECTOR_SIZE;
+        uint32_t sector_off = cur_off % SECTOR_SIZE;
+        uint32_t lba        = de->start_lba + sector_idx;
+
+        if (sector_off != 0 || remaining < SECTOR_SIZE) {
+            if (ata_read_sector(lba, sector_buf) < 0) return -1;
+        } else {
+            memset(sector_buf, 0, SECTOR_SIZE);
+        }
+
+        uint32_t to_copy = SECTOR_SIZE - sector_off;
+        if (to_copy > remaining) to_copy = remaining;
+        memcpy(sector_buf + sector_off, src, to_copy);
+
+        if (ata_write_sector(lba, sector_buf) < 0) return -1;
+
+        src       += to_copy;
+        cur_off   += to_copy;
+        remaining -= to_copy;
+    }
+
+    uint32_t new_end = off + len;
+    de->size = new_end;
+    v->size  = new_end;
+    diskfs_flush_dir();
+    return (int)len;
+}
+
+static fs_ops_t diskfile_ops = {
+    .read  = diskfile_read,
+    .write = diskfile_write,
+};
 
 /* ── directory ops ─────────────────────────────────────────────────────── */
 
@@ -73,9 +135,50 @@ static int diskdir_readdir(vnode_t *d, uint32_t idx,
     return -1;
 }
 
+static vnode_t *diskdir_create(vnode_t *d, const char *name) {
+    (void)d;
+    if (!name || !name[0]) return NULL;
+
+    uint32_t nlen = 0;
+    while (name[nlen]) nlen++;
+    if (nlen >= 16) return NULL;
+
+    for (uint32_t i = 0; i < DISKFS_MAX_FILES; i++) {
+        if ((dir[i].flags & DISKFS_FLAG_ACTIVE) &&
+            strcmp(dir[i].name, name) == 0)
+            return NULL;   /* already exists */
+    }
+
+    uint32_t slot = DISKFS_MAX_FILES;
+    for (uint32_t i = 0; i < DISKFS_MAX_FILES; i++) {
+        if (!(dir[i].flags & DISKFS_FLAG_ACTIVE)) { slot = i; break; }
+    }
+    if (slot == DISKFS_MAX_FILES) return NULL;
+
+    for (uint32_t i = 0; i < nlen; i++) dir[slot].name[i] = name[i];
+    dir[slot].name[nlen]      = '\0';
+    dir[slot].start_lba       = next_free_lba;
+    dir[slot].size            = 0;
+    dir[slot].flags           = DISKFS_FLAG_ACTIVE;
+    dir[slot].alloc_sectors   = DISKFS_PREALLOC_SECTORS;
+
+    next_free_lba += DISKFS_PREALLOC_SECTORS;
+    n_active++;
+
+    file_vnodes[slot].type = VTYPE_FILE;
+    file_vnodes[slot].size = 0;
+    file_vnodes[slot].priv = &dir[slot];
+    file_vnodes[slot].ops  = &diskfile_ops;
+    file_vnodes[slot].refs = 0;
+
+    diskfs_flush_dir();
+    return &file_vnodes[slot];
+}
+
 static fs_ops_t diskdir_ops = {
     .lookup  = diskdir_lookup,
     .readdir = diskdir_readdir,
+    .create  = diskdir_create,
 };
 
 static vnode_t diskdir_vnode = {
@@ -119,7 +222,16 @@ void diskfs_init(void) {
         file_vnodes[i].size = dir[i].size;
         file_vnodes[i].priv = &dir[i];
         file_vnodes[i].ops  = &diskfile_ops;
+        file_vnodes[i].refs = 0;
         n_active++;
+    }
+
+    /* Compute next_free_lba = first LBA past all allocated file data. */
+    next_free_lba = DISKFS_DATA_START;
+    for (uint32_t i = 0; i < DISKFS_MAX_FILES; i++) {
+        if (!(dir[i].flags & DISKFS_FLAG_ACTIVE)) continue;
+        uint32_t end = dir[i].start_lba + dir[i].alloc_sectors;
+        if (end > next_free_lba) next_free_lba = end;
     }
 
     vfs_mount("/disk", &diskdir_vnode);

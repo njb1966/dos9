@@ -124,7 +124,7 @@ static void cmd_exec(const char *path) {
     /* Derive a short process name from the path's final component. */
     const char *name = path;
     for (const char *s = path; *s; s++) if (*s == '/') name = s + 1;
-    process_t *p = process_create_user(entry, name, pd_phys);
+    process_t *p = process_create_user(entry, name, pd_phys, NULL, 0);
     if (!p) {
         terminal_write("exec: process table full\n");
         return;
@@ -194,7 +194,7 @@ uint32_t shell_exec_user(const char *path) {
     const char *name = path;
     for (const char *s = path; *s; s++) if (*s == '/') name = s + 1;
 
-    process_t *p = process_create_user(entry, name, pd_phys);
+    process_t *p = process_create_user(entry, name, pd_phys, NULL, 0);
     if (!p) return 0;
     p->brk = brk_start;
     return p->pid;

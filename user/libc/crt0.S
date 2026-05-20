@@ -1,17 +1,22 @@
 /* crt0.S — C runtime startup for DOS/9 user-space programs.
-   The kernel sets ESP = USER_STACK_TOP (0xBFFF0000, 16-byte aligned).
-   We align the stack, push argc=0/argv=NULL, then call main.
-   On return, pass main's exit code to exit(). */
+   The kernel sets up the user stack with:
+     [esp+0]  = argc
+     [esp+4]  = argv[0]   (pointer to first argument string)
+     ...
+     [esp+4*(argc+1)] = NULL sentinel
+   We save argc and compute argv before aligning the stack, then call main. */
 
 .section .text
 .global _start
 _start:
-    andl  $-16, %esp        /* guarantee 16-byte alignment */
-    subl  $8,   %esp        /* pad so (argc + argv + pad) = 16 bytes total */
-    pushl $0                /* argv = NULL */
-    pushl $0                /* argc = 0 */
+    movl  (%esp),  %ebx     /* ebx = argc */
+    leal  4(%esp), %edx     /* edx = argv (pointer to argv[0]) */
+    andl  $-16, %esp        /* 16-byte align */
+    subl  $8,   %esp        /* two padding words */
+    pushl %edx              /* argv */
+    pushl %ebx              /* argc */
     call  main
-    addl  $16,  %esp        /* discard args + pad */
-    pushl %eax              /* exit code = main() return value */
+    addl  $16,  %esp
+    pushl %eax
     call  exit
-1:  jmp   1b               /* unreachable */
+1:  jmp   1b

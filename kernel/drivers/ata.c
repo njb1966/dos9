@@ -20,8 +20,9 @@
 #define ATA_SR_DRQ   0x08u
 #define ATA_SR_ERR   0x01u
 
-#define ATA_CMD_READ_SECTORS 0x20u
-#define ATA_CMD_IDENTIFY     0xECu
+#define ATA_CMD_READ_SECTORS  0x20u
+#define ATA_CMD_WRITE_SECTORS 0x30u
+#define ATA_CMD_IDENTIFY      0xECu
 
 static int disk_present = 0;
 
@@ -95,6 +96,34 @@ void ata_init(void) {
 }
 
 int ata_present(void) { return disk_present; }
+
+int ata_write_sector(uint32_t lba, const void *buf) {
+    if (!disk_present) return -1;
+
+    uint8_t st = ata_wait_busy();
+    if (st == 0xFF || (st & ATA_SR_ERR)) return -1;
+
+    outb(ATA_DRIVE_HEAD, (uint8_t)(0xE0 | ((lba >> 24) & 0x0Fu)));
+    ata_delay();
+
+    outb(ATA_SECT_CNT, 1);
+    outb(ATA_LBA_LO,   (uint8_t)(lba));
+    outb(ATA_LBA_MID,  (uint8_t)(lba >>  8));
+    outb(ATA_LBA_HI,   (uint8_t)(lba >> 16));
+    outb(ATA_COMMAND, ATA_CMD_WRITE_SECTORS);
+
+    st = ata_wait_drq();
+    if (st == 0xFF || (st & ATA_SR_ERR)) return -1;
+
+    const uint16_t *p = (const uint16_t *)buf;
+    for (int i = 0; i < 256; i++) outw(ATA_DATA, p[i]);
+
+    ata_delay();
+    st = ata_wait_busy();
+    if (st == 0xFF || (st & ATA_SR_ERR)) return -1;
+
+    return 0;
+}
 
 int ata_read_sector(uint32_t lba, void *buf) {
     if (!disk_present) return -1;

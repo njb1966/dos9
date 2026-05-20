@@ -29,6 +29,7 @@
 #define O_RDONLY 0
 #define O_WRONLY 1
 #define O_RDWR   2
+#define O_CREAT  4
 
 /* ── lseek whence ─────────────────────────────────────────────────────── */
 #define SEEK_SET 0
@@ -97,7 +98,14 @@ static inline void *sbrk(int32_t increment) {
 
 /* exec — spawn a new user process from path; returns new pid, -1 on error. */
 static inline int exec(const char *path) {
-    return (int)_syscall1(SYS_EXEC, (int32_t)(uintptr_t)path);
+    return (int)_syscall3(SYS_EXEC, (int32_t)(uintptr_t)path, 0, 0);
+}
+
+/* execv — spawn process with argv; argv[0..argc-1] are the arguments,
+   argv[argc] must be NULL.  Returns new pid, -1 on error. */
+static inline int execv(const char *path, const char **argv, int argc) {
+    return (int)_syscall3(SYS_EXEC, (int32_t)(uintptr_t)path,
+                          (int32_t)(uintptr_t)argv, (int32_t)argc);
 }
 
 /* readdir — read directory entry at idx; returns 1 if found, 0 at end, -1 error. */

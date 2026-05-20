@@ -18,6 +18,8 @@
 
 #define DISKFS_FLAG_ACTIVE 1u
 
+#define DISKFS_PREALLOC_SECTORS 64u   /* 32KB pre-allocated per new text file */
+
 typedef struct {
     uint32_t magic;        /* DISKFS_MAGIC */
     uint32_t n_files;      /* number of active directory entries */
@@ -30,7 +32,7 @@ typedef struct {
     uint32_t start_lba;    /* first data sector */
     uint32_t size;         /* file size in bytes */
     uint32_t flags;        /* DISKFS_FLAG_ACTIVE or 0 (empty slot) */
-    uint8_t  pad[4];       /* pad to 32 bytes */
+    uint32_t alloc_sectors; /* sectors reserved for this file */
 } __attribute__((packed)) diskfs_dirent_t;
 
 /* Mount the disk filesystem at /disk.  Must be called after ata_init()
