@@ -180,6 +180,26 @@ static void execute(const char *cmd) {
     terminal_putchar('\n');
 }
 
+/* Launch a user ELF from path; return its pid on success, 0 on failure. */
+uint32_t shell_exec_user(const char *path) {
+    uint32_t size = 0;
+    void *bin = slurp(path, &size);
+    if (!bin) return 0;
+
+    uint32_t pd_phys = 0, brk_start = 0;
+    uint32_t entry = elf_load(bin, size, &pd_phys, &brk_start);
+    kfree(bin);
+    if (!entry) return 0;
+
+    const char *name = path;
+    for (const char *s = path; *s; s++) if (*s == '/') name = s + 1;
+
+    process_t *p = process_create_user(entry, name, pd_phys);
+    if (!p) return 0;
+    p->brk = brk_start;
+    return p->pid;
+}
+
 void shell_run(void) {
     for (;;) {
         terminal_write("DOS/9> ");

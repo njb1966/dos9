@@ -67,12 +67,33 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
     terminal_write("[SYSCALL] int 0x80 gate active\n");
 
     ata_init();
-    if (ata_present()) diskfs_init();
+    uint32_t sh_pid = 0;
+    if (ata_present()) {
+        diskfs_init();
+        sh_pid = shell_exec_user("/disk/sh");
+        if (sh_pid)
+            terminal_write("[INIT] /disk/sh launched\n");
+    }
 
     process_create(spinner_task, "spinner");
     terminal_write("[PROC] scheduler active\n");
 
     (void)mb_magic; (void)mb_info;   /* now consumed by pmm_init / modfs */
+
+    /* Wait for the user shell to exit before touching the keyboard. */
+    if (sh_pid) {
+        for (;;) {
+            int alive = 0;
+            for (int i = 0; ; i++) {
+                process_t *p = process_get(i);
+                if (!p) break;
+                if (p->pid == sh_pid && p->state != PROC_DEAD) { alive = 1; break; }
+            }
+            if (!alive) break;
+            schedule();
+        }
+        terminal_write("\n[INIT] sh exited -- kernel shell\n");
+    }
 
     shell_run();
 }
