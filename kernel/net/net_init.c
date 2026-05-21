@@ -1,6 +1,7 @@
 #include <net_init.h>
 #include <rtl8139.h>
 #include <netfs.h>
+#include <dns.h>
 #include <dhcp.h>
 #include <terminal.h>
 
@@ -9,6 +10,7 @@ int net_init(void) {
         terminal_write("[NET] no RTL8139 found\n");
         return 0;
     }
+    dns_init();
     netfs_init();
     terminal_write("[NET] /net mounted\n");
     dhcp_start();

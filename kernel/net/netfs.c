@@ -24,6 +24,7 @@
 #include <netfs.h>
 #include <vfs.h>
 #include <tcp.h>
+#include <dns.h>
 #include <netif.h>
 #include <net.h>
 #include <string.h>
@@ -243,20 +244,77 @@ static int tcp_dir_readdir(vnode_t *d, uint32_t idx, char *name_out, uint32_t nm
 static fs_ops_t tcp_dir_ops = { .lookup = tcp_dir_lookup, .readdir = tcp_dir_readdir };
 static vnode_t  tcp_dir_vnode = { .type = VTYPE_DIR, .ops = &tcp_dir_ops };
 
+/* ── /net/resolve ────────────────────────────────────────────────────────── */
+
+/* Write a hostname → blocking DNS lookup → read back "A.B.C.D\n" or "error\n".
+   Separate open-write-close / open-read-close is the intended usage pattern. */
+
+static char g_resolve_buf[24];   /* "255.255.255.255\n\0" fits in 18 bytes */
+
+static int resolve_write(vnode_t *v, const void *buf, uint32_t off, uint32_t len) {
+    (void)v; (void)off;
+    char hostname[128];
+    uint32_t copy = len < (uint32_t)(sizeof(hostname) - 1u) ? len : (uint32_t)(sizeof(hostname) - 1u);
+    memcpy(hostname, buf, copy);
+    hostname[copy] = '\0';
+    /* Strip trailing whitespace / newline */
+    while (copy > 0 &&
+           (hostname[copy-1u] == '\n' || hostname[copy-1u] == '\r' ||
+            hostname[copy-1u] == ' '))
+        hostname[--copy] = '\0';
+
+    uint32_t ip = 0;
+    if (dns_lookup(hostname, &ip) == 0) {
+        /* Format "A.B.C.D\n" into g_resolve_buf */
+        char *p = g_resolve_buf;
+        uint8_t oct[4] = {
+            (uint8_t)(ip >> 24), (uint8_t)(ip >> 16),
+            (uint8_t)(ip >>  8), (uint8_t)ip
+        };
+        for (int i = 0; i < 4; i++) {
+            uint8_t n = oct[i];
+            if (n >= 100) { *p++ = (char)('0' + n/100); n = (uint8_t)(n % 100);
+                            *p++ = (char)('0' + n/10);  n = (uint8_t)(n % 10); }
+            else if (n >= 10) { *p++ = (char)('0' + n/10); n = (uint8_t)(n % 10); }
+            *p++ = (char)('0' + n);
+            if (i < 3) *p++ = '.';
+        }
+        *p++ = '\n'; *p = '\0';
+    } else {
+        memcpy(g_resolve_buf, "error\n", 7);
+    }
+    return (int)len;
+}
+
+static int resolve_read(vnode_t *v, void *buf, uint32_t off, uint32_t len) {
+    (void)v;
+    uint32_t total = (uint32_t)strlen(g_resolve_buf);
+    if (off >= total) return 0;
+    uint32_t copy = total - off;
+    if (copy > len) copy = len;
+    memcpy(buf, g_resolve_buf + off, copy);
+    return (int)copy;
+}
+
+static fs_ops_t resolve_ops = { .read = resolve_read, .write = resolve_write };
+static vnode_t  resolve_vnode = { .type = VTYPE_FILE, .ops = &resolve_ops };
+
 /* ── /net root ───────────────────────────────────────────────────────────── */
 
 static vnode_t *net_root_lookup(vnode_t *d, const char *name) {
     (void)d;
-    if (strncmp(name, "info", 5) == 0) return &info_vnode;
-    if (strncmp(name, "tcp",  4) == 0) return &tcp_dir_vnode;
+    if (strncmp(name, "info",    5) == 0) return &info_vnode;
+    if (strncmp(name, "resolve", 8) == 0) return &resolve_vnode;
+    if (strncmp(name, "tcp",     4) == 0) return &tcp_dir_vnode;
     return NULL;
 }
 
 static int net_root_readdir(vnode_t *d, uint32_t idx,
                              char *name_out, uint32_t nmax) {
     (void)d;
-    if (idx == 0) { strncpy(name_out, "info", nmax); return 0; }
-    if (idx == 1) { strncpy(name_out, "tcp",  nmax); return 0; }
+    if (idx == 0) { strncpy(name_out, "info",    nmax); return 0; }
+    if (idx == 1) { strncpy(name_out, "resolve", nmax); return 0; }
+    if (idx == 2) { strncpy(name_out, "tcp",     nmax); return 0; }
     return -1;
 }
 

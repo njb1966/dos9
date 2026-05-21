@@ -1,20 +1,19 @@
 /*
  * gopher — DOS/9 Gopher client.
  *
- * Uses the Plan 9-style /net/tcp filesystem to establish TCP connections.
+ * Uses the Plan 9-style /net/tcp filesystem to establish TCP connections
+ * and /net/resolve for hostname-to-IP resolution.
  *
  * Usage:
- *   gopher <ip> [port] [selector]
+ *   gopher <host> [port] [selector]
  *
  * Examples:
- *   gopher 10.0.2.2 70 /             -- browse root menu
- *   gopher 10.0.2.15 70              -- default selector is empty string
+ *   gopher gopher.floodgap.com 70 /  -- browse by hostname
+ *   gopher 10.0.2.2 70 /             -- browse root menu by IP
  *
  * Gopher item types (RFC 1436):
  *   0  text file       1  directory menu   7  search
  *   h  HTML (escaped)  i  info line
- *
- * Note: DNS is not yet implemented; use IP addresses.
  */
 
 #include <dos9.h>
@@ -49,6 +48,36 @@ static void print_menu_line(const char *line, int len) {
         putchar(*p++);
     }
     putchar('\n');
+}
+
+/* Returns 1 if s contains any non-digit, non-dot character (i.e. not a bare IP). */
+static int is_hostname(const char *s) {
+    while (*s) {
+        if ((*s < '0' || *s > '9') && *s != '.') return 1;
+        s++;
+    }
+    return 0;
+}
+
+/* Resolve hostname via /net/resolve.  Writes dotted-decimal into out[]. */
+static int resolve_hostname(const char *hostname, char *out, int outlen) {
+    int fd = open("/net/resolve", O_WRONLY);
+    if (fd < 0) return -1;
+    int hlen = 0;
+    while (hostname[hlen]) hlen++;
+    write(fd, hostname, hlen);
+    close(fd);
+
+    fd = open("/net/resolve", O_RDONLY);
+    if (fd < 0) return -1;
+    int n = read(fd, out, outlen - 1);
+    close(fd);
+    if (n <= 0) return -1;
+    out[n] = '\0';
+    for (int i = 0; i < n; i++) if (out[i] == '\n') { out[i] = '\0'; break; }
+    /* /net/resolve returns "error" on failure */
+    if (out[0] == 'e' && out[1] == 'r') return -1;
+    return 0;
 }
 
 static int do_gopher(const char *host_ip, int port, const char *selector) {
@@ -161,21 +190,31 @@ static int do_gopher(const char *host_ip, int port, const char *selector) {
 
 int main(int argc, const char **argv) {
     if (argc < 2) {
-        puts("usage: gopher <ip> [port] [selector]");
+        puts("usage: gopher <host> [port] [selector]");
         return 1;
     }
 
-    const char *ip       = argv[1];
+    const char *host     = argv[1];
     int         port     = GOPHER_DEFAULT_PORT;
     const char *selector = "";
 
     if (argc >= 3) {
-        /* Parse port manually. */
         const char *ps = argv[2];
         port = 0;
         while (*ps >= '0' && *ps <= '9') { port = port * 10 + (*ps++ - '0'); }
     }
     if (argc >= 4) selector = argv[3];
+
+    /* Resolve hostname to dotted-decimal IP if needed */
+    char ip_buf[20];
+    const char *ip = host;
+    if (is_hostname(host)) {
+        if (resolve_hostname(host, ip_buf, (int)sizeof(ip_buf)) < 0) {
+            puts("gopher: hostname resolution failed");
+            return 1;
+        }
+        ip = ip_buf;
+    }
 
     return do_gopher(ip, port, selector);
 }

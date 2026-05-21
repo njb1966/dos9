@@ -220,11 +220,19 @@ This is the emotional hardest phase. It looks like nothing. It is the foundation
 
 **Goal:** This is what makes DOS/9 *findable* and *loved* by its target audience.
 
-- [ ] Native Gemini browser (TUI).
-- [ ] Native Gopher client.
+#### Phase 4a — networking foundation (complete 2026-05-21)
+- [x] Full TCP/IP stack: PCI enum, RTL8139 NIC, Ethernet+ARP+IP+ICMP+UDP+TCP, DHCP auto-config at boot.
+- [x] Plan 9 `/net` VFS: `/net/info`, `/net/tcp/clone`, `/net/tcp/<n>/{ctl,data,status}`.
+- [x] Native Gopher client (`user/gopher.c`) — TCP via /net/tcp.
+
+#### Phase 4b — name resolution + TLS (in progress)
+- [x] DNS resolver (`kernel/net/dns.c`) — synchronous UDP A-record lookup; `/net/resolve` VFS file exposes it to user space; `gopher` now accepts hostnames. (2026-05-21)
+- [ ] TLS — port BearSSL (~50 KB, designed for constrained environments) as the TLS layer.
+- [ ] Native Gemini browser (TUI) — requires TLS above.
+
+#### Phase 4c — readers
 - [ ] Native RSS reader.
 - [ ] Possibly: Finger, NNTP, IRC clients.
-- [ ] A networking stack capable of supporting the above. (This is significant work. Possibly use lwIP as a starting point rather than rolling our own TCP/IP.)
 - [ ] **Aspirational:** lay groundwork for the 9P-style remote-as-local mount idea (§1.1). Even a read-only "mount a Gemini capsule as a directory" prototype would be the moment DOS/9's thesis becomes undeniable. Not promised. Designed-for, not built-yet.
 
 ### Phase 5 — Games as first-class citizens
