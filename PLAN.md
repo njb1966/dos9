@@ -3,7 +3,7 @@
 > **Project name:** **DOS/9** (pronounced "dos-nine")
 > **Tagline:** Simple. Visible. Yours.
 > **Sub tagline:** A Native Text Operating System
-> **Status:** Phase 3 in progress — user-space shell running at ring 3; SYS_EXEC/READDIR/UNLINK/WAITPID live.
+> **Status:** Phase 3 complete (2026-05-21) — full userland: shell+scripting, TUI toolkit, file manager, text editor, disk write, argv, package system. Next: Phase 4 (small web / networking).
 > **Repository:** https://github.com/njb1966/dos9 (GitHub only — see CLAUDE.md for push workflow)
 
 DOS/9
@@ -202,7 +202,7 @@ This is the emotional hardest phase. It looks like nothing. It is the foundation
 - [x] **Text editor** — `user/ed.c`: full-screen, arrows/^S/^Q/^K, 300-line buffer, creates new files via O_CREAT. (2026-05-20)
 - [x] **Disk write** — ATA PIO write (`ata_write_sector`); diskfs in-place overwrite + file creation; O_CREAT in vfs_open; alloc_sectors in dirent. (2026-05-20)
 - [x] **argv support** — write_user_argv writes argc/argv to topmost user stack page; crt0.S reads from initial esp; shell passes args via execv(). (2026-05-20)
-- [ ] **Package system** — simple, signed. Installs ELF binaries + metadata to `/disk`. No dependency resolver for v1.
+- [x] **Package system** — `.d9p` format (64-byte header: magic D9PK + name + CRC32 + elf_size); `tools/pack` creates packages on host; `user/pkg.c` installs to `/disk` with CRC32 verification. `hello.d9p` demo ships on disk. (2026-05-21)
 
 #### Known technical debt / future improvements
 - ELF loader (`elf_load`) copies segment data byte-by-byte via page-table walk. Should batch by page.
