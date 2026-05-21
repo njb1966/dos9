@@ -16,11 +16,14 @@ INITRD_ARG=""
 DISK_ARG=""
 [ -f "$DISK_IMG" ] && DISK_ARG="-drive file=$DISK_IMG,format=raw,if=ide,index=0,media=disk"
 
+NET_ARG="-netdev user,id=n0 -device rtl8139,netdev=n0"
+
 if [ "$1" = "--debug" ]; then
     exec qemu-system-i386 \
         -kernel "$KERNEL" \
         $INITRD_ARG \
         $DISK_ARG \
+        $NET_ARG \
         -serial stdio \
         -s -S
 else
@@ -28,5 +31,6 @@ else
         -kernel "$KERNEL" \
         $INITRD_ARG \
         $DISK_ARG \
+        $NET_ARG \
         -serial stdio
 fi

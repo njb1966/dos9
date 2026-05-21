@@ -10,3 +10,4 @@ typedef void (*irq_handler_t)(struct registers *);
 void pic_init(void);
 void pic_eoi(int irq);
 void irq_register(int irq, irq_handler_t handler);
+void pic_unmask_irq(int irq);

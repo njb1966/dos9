@@ -15,6 +15,7 @@ USER_TUIDEMO := $(BUILD)/user/tuidemo.elf
 USER_FM      := $(BUILD)/user/fm.elf
 USER_ED      := $(BUILD)/user/ed.elf
 USER_PKG     := $(BUILD)/user/pkg.elf
+USER_GOPHER  := $(BUILD)/user/gopher.elf
 
 # Host tools (native gcc — not cross-compiled)
 PACK  := tools/pack
@@ -41,7 +42,7 @@ MKDISK := tools/mkdisk
 
 .PHONY: all clean run debug disk
 
-all: $(KERNEL) $(USER_ELF) $(USER_SH) $(USER_CAT) $(USER_TUIDEMO) $(USER_FM) $(USER_ED) $(USER_PKG) $(PACK)
+all: $(KERNEL) $(USER_ELF) $(USER_SH) $(USER_CAT) $(USER_TUIDEMO) $(USER_FM) $(USER_ED) $(USER_PKG) $(USER_GOPHER) $(PACK)
 
 # ── User-space (libc + programs) — defined before generic kernel rules ────
 
@@ -109,6 +110,14 @@ $(USER_PKG): $(LIBC_OBJS) $(BUILD)/user/pkg_main.o user/user.ld
 	$(LD) -T user/user.ld -o $@ \
 	    $(LIBC_CRT0) $(BUILD)/user/pkg_main.o $(LIBC_C_OBJS)
 
+$(BUILD)/user/gopher_main.o: user/gopher.c
+	@mkdir -p $(dir $@)
+	$(CC) $(UCFLAGS) -c $< -o $@
+
+$(USER_GOPHER): $(LIBC_OBJS) $(BUILD)/user/gopher_main.o user/user.ld
+	$(LD) -T user/user.ld -o $@ \
+	    $(LIBC_CRT0) $(BUILD)/user/gopher_main.o $(LIBC_C_OBJS)
+
 # ── Kernel ────────────────────────────────────────────────────────────────
 
 $(BUILD)/%.o: %.c
@@ -140,16 +149,16 @@ $(HELLO_D9P): $(PACK) $(USER_ELF)
 # Writes DOS9FS to disk.img with the user hello ELF as "hello".
 # Run once after initial 'dd' setup, then again whenever user programs change.
 
-disk: $(MKDISK) $(USER_ELF) $(USER_SH) $(USER_CAT) $(USER_TUIDEMO) $(USER_FM) $(USER_ED) $(USER_PKG) $(HELLO_D9P)
+disk: $(MKDISK) $(USER_ELF) $(USER_SH) $(USER_CAT) $(USER_TUIDEMO) $(USER_FM) $(USER_ED) $(USER_PKG) $(USER_GOPHER) $(HELLO_D9P)
 	@[ -f disk.img ] || { echo "error: disk.img not found — run: dd if=/dev/zero of=disk.img bs=512 count=16384" >&2; exit 1; }
 	./$(MKDISK) disk.img hello=$(USER_ELF) sh=$(USER_SH) cat=$(USER_CAT) \
 	    tuidemo=$(USER_TUIDEMO) fm=$(USER_FM) ed=$(USER_ED) pkg=$(USER_PKG) \
-	    hello.d9p=$(HELLO_D9P)
+	    gopher=$(USER_GOPHER) hello.d9p=$(HELLO_D9P)
 
-run: $(KERNEL) $(USER_ELF) $(USER_SH) $(USER_CAT) $(USER_TUIDEMO) $(USER_FM) $(USER_ED) $(USER_PKG) $(HELLO_D9P)
+run: $(KERNEL) $(USER_ELF) $(USER_SH) $(USER_CAT) $(USER_TUIDEMO) $(USER_FM) $(USER_ED) $(USER_PKG) $(USER_GOPHER) $(HELLO_D9P)
 	./scripts/qemu.sh
 
-debug: $(KERNEL) $(USER_ELF) $(USER_SH) $(USER_CAT) $(USER_TUIDEMO) $(USER_FM) $(USER_ED) $(USER_PKG) $(HELLO_D9P)
+debug: $(KERNEL) $(USER_ELF) $(USER_SH) $(USER_CAT) $(USER_TUIDEMO) $(USER_FM) $(USER_ED) $(USER_PKG) $(USER_GOPHER) $(HELLO_D9P)
 	./scripts/qemu.sh --debug
 
 clean:

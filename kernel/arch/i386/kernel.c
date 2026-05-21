@@ -16,6 +16,8 @@
 #include <syscall.h>
 #include <ata.h>
 #include <diskfs.h>
+#include <net_init.h>
+#include <dhcp.h>
 #include <kernel.h>
 #include <stdint.h>
 
@@ -65,6 +67,14 @@ void kernel_main(uint32_t mb_magic, void *mb_info) {
 
     syscall_init();
     terminal_write("[SYSCALL] int 0x80 gate active\n");
+
+    net_init();
+    /* Wait up to ~3 s for DHCP (schedule() yields to other tasks that
+       let IRQs fire; NIC IRQ will fill DHCP offer via the UDP handler). */
+    for (int i = 0; i < 300 && !dhcp_done(); i++)
+        schedule();
+    if (!dhcp_done())
+        terminal_write("[DHCP] timeout -- network may not work\n");
 
     ata_init();
     uint32_t sh_pid = 0;

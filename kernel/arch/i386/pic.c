@@ -58,6 +58,15 @@ void irq_register(int irq, irq_handler_t handler) {
         irq_handlers[irq] = handler;
 }
 
+void pic_unmask_irq(int irq) {
+    if (irq < 8) {
+        outb(PIC1_DATA, inb(PIC1_DATA) & (uint8_t)~(1u << irq));
+    } else {
+        outb(PIC2_DATA, inb(PIC2_DATA) & (uint8_t)~(1u << (irq - 8)));
+        outb(PIC1_DATA, inb(PIC1_DATA) & (uint8_t)~(1u << 2));  /* unmask cascade */
+    }
+}
+
 /* Called from irq_common in isr.S */
 void irq_handler(struct registers *r) {
     int irq = r->int_no - IRQ_BASE_MASTER;
