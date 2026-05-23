@@ -43,9 +43,11 @@ static inline int frame_test(uint32_t f) {
 
 /* Mark every frame that overlaps [base, base+len) as used. */
 static void mark_used(uint32_t base, uint32_t len) {
-    uint32_t first = base / PAGE_SIZE;
-    uint32_t last  = (base + len + PAGE_SIZE - 1) / PAGE_SIZE;
-    for (uint32_t f = first; f < last && f < total_frames; f++)
+    if (len == 0) return;
+    uint64_t first = (uint64_t)base / PAGE_SIZE;
+    uint64_t end   = (uint64_t)base + (uint64_t)len;
+    uint64_t last  = (end + PAGE_SIZE - 1u) / PAGE_SIZE;
+    for (uint64_t f = first; f < last && f < total_frames; f++)
         frame_set(f);
 }
 
@@ -54,9 +56,9 @@ static void mark_used(uint32_t base, uint32_t len) {
  * Rounds start up and end down to avoid freeing partially-covered frames.
  */
 static void mark_free(uint32_t base, uint32_t len) {
-    uint32_t first = (base + PAGE_SIZE - 1) / PAGE_SIZE;
-    uint32_t last  = (base + len) / PAGE_SIZE;
-    for (uint32_t f = first; f < last && f < total_frames; f++) {
+    uint64_t first = ((uint64_t)base + PAGE_SIZE - 1u) / PAGE_SIZE;
+    uint64_t last  = ((uint64_t)base + (uint64_t)len) / PAGE_SIZE;
+    for (uint64_t f = first; f < last && f < total_frames; f++) {
         if (frame_test(f)) {    /* only count frames that were used */
             frame_clear(f);
             free_count++;
@@ -78,7 +80,8 @@ void pmm_init(uint32_t magic, void *mbi_ptr) {
     uint32_t mem_kb = 1024 + (
         (mbi->flags & MULTIBOOT_FLAG_MEM) ? mbi->mem_upper : 0
     );
-    total_frames = (mem_kb * 1024) / PAGE_SIZE;
+    uint64_t mem_bytes = (uint64_t)mem_kb * 1024u;
+    total_frames = (uint32_t)(mem_bytes / PAGE_SIZE);
     free_count   = 0;
 
     /* Snapshot multiboot mods BEFORE we touch the bitmap.  The loader often
@@ -90,7 +93,11 @@ void pmm_init(uint32_t magic, void *mbi_ptr) {
             (struct multiboot_mod *)(uintptr_t)(mbi->mods_addr);
         uint32_t n = mbi->mods_count;
         if (n > MAX_SAVED_MODS) n = MAX_SAVED_MODS;
-        for (uint32_t i = 0; i < n; i++) saved_mods[i] = src[i];
+        for (uint32_t i = 0; i < n; i++) {
+            saved_mods[i] = src[i];
+            if (saved_mods[i].mod_end < saved_mods[i].mod_start)
+                saved_mods[i].mod_end = saved_mods[i].mod_start;
+        }
         saved_mods_count = n;
     }
 
@@ -101,8 +108,12 @@ void pmm_init(uint32_t magic, void *mbi_ptr) {
     uint32_t kend_phys = PHYS((uint32_t)_kernel_end);
     uint32_t bm_phys   = kend_phys;
     if ((mbi->flags & MULTIBOOT_FLAG_MODS) && mbi->mods_count > 0) {
-        uint32_t mods_end = mbi->mods_addr +
-                            mbi->mods_count * sizeof(struct multiboot_mod);
+        uint64_t mods_end64 = (uint64_t)mbi->mods_addr +
+                              (uint64_t)mbi->mods_count *
+                              (uint64_t)sizeof(struct multiboot_mod);
+        uint32_t mods_end = (mods_end64 > 0xFFFFFFFFu)
+            ? 0xFFFFFFFFu
+            : (uint32_t)mods_end64;
         if (mods_end > bm_phys) bm_phys = mods_end;
         for (uint32_t i = 0; i < saved_mods_count; i++)
             if (saved_mods[i].mod_end > bm_phys) bm_phys = saved_mods[i].mod_end;
@@ -138,7 +149,9 @@ void pmm_init(uint32_t magic, void *mbi_ptr) {
         }
     } else {
         /* Fallback: assume memory above 1MB is all available. */
-        mark_free(0x100000, mbi->mem_upper * 1024);
+        uint64_t upper_bytes = (uint64_t)mbi->mem_upper * 1024u;
+        if (upper_bytes > 0xFFFFFFFFu) upper_bytes = 0xFFFFFFFFu;
+        mark_free(0x100000, (uint32_t)upper_bytes);
     }
 
     /* 3. Re-mark the kernel image used. */
@@ -150,8 +163,12 @@ void pmm_init(uint32_t magic, void *mbi_ptr) {
     /* 5. Mark multiboot mods array + every module's data used (from snapshot,
           since the originals may already be inside the bitmap region). */
     if (saved_mods_count > 0) {
-        mark_used(mbi->mods_addr,
-                  mbi->mods_count * sizeof(struct multiboot_mod));
+        uint64_t mods_len64 = (uint64_t)mbi->mods_count *
+                              (uint64_t)sizeof(struct multiboot_mod);
+        uint32_t mods_len = (mods_len64 > 0xFFFFFFFFu)
+            ? 0xFFFFFFFFu
+            : (uint32_t)mods_len64;
+        mark_used(mbi->mods_addr, mods_len);
         for (uint32_t i = 0; i < saved_mods_count; i++)
             mark_used(saved_mods[i].mod_start,
                       saved_mods[i].mod_end - saved_mods[i].mod_start);

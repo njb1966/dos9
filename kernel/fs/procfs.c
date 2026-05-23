@@ -23,6 +23,20 @@ static uint32_t str_append(char *dst, uint32_t pos, const char *src) {
     return pos;
 }
 
+static int parse_pid(const char *name, uint32_t *pid_out) {
+    uint32_t pid = 0;
+    if (!name || !*name) return -1;
+    while (*name >= '0' && *name <= '9') {
+        uint32_t digit = (uint32_t)(*name++ - '0');
+        if (pid > 429496729u || (pid == 429496729u && digit > 5u))
+            return -1;
+        pid = pid * 10u + digit;
+    }
+    if (*name != '\0') return -1;
+    *pid_out = pid;
+    return 0;
+}
+
 static uint32_t gen_status(int idx, char *buf) {
     process_t *p = process_get(idx);
     if (!p) return 0;
@@ -72,7 +86,16 @@ static vnode_t *pid_dir_lookup(vnode_t *dir, const char *name) {
 static int pid_dir_readdir(vnode_t *dir, uint32_t idx,
                             char *name_out, uint32_t nmax) {
     (void)dir;
-    if (idx == 0) { strncpy(name_out, "status", nmax); return 0; }
+    if (idx == 0) {
+        if (nmax == 0) return -1;
+        uint32_t i = 0;
+        while (i + 1 < nmax && "status"[i]) {
+            name_out[i] = "status"[i];
+            i++;
+        }
+        name_out[i] = '\0';
+        return 0;
+    }
     return -1;
 }
 
@@ -83,10 +106,7 @@ static fs_ops_t pid_dir_ops = { .lookup = pid_dir_lookup, .readdir = pid_dir_rea
 static vnode_t *proc_root_lookup(vnode_t *dir, const char *name) {
     (void)dir;
     uint32_t pid = 0;
-    for (const char *s = name; *s; s++) {
-        if (*s < '0' || *s > '9') return NULL;
-        pid = pid * 10 + (uint32_t)(*s - '0');
-    }
+    if (parse_pid(name, &pid) < 0) return NULL;
     int n = process_count();
     for (int i = 0; i < n; i++) {
         process_t *p = process_get(i);
@@ -107,7 +127,13 @@ static int proc_root_readdir(vnode_t *dir, uint32_t idx,
         if (active == idx) {
             char num[12];
             uint_to_str(p->pid, num);
-            strncpy(name_out, num, nmax);
+            if (nmax == 0) return -1;
+            uint32_t j = 0;
+            while (j + 1 < nmax && num[j]) {
+                name_out[j] = num[j];
+                j++;
+            }
+            name_out[j] = '\0';
             return 0;
         }
         active++;
@@ -118,12 +144,8 @@ static int proc_root_readdir(vnode_t *dir, uint32_t idx,
 /* rm /proc/<pid> kills the process — the §1.1 commitment, made typeable. */
 static int proc_root_unlink(vnode_t *dir, const char *name) {
     (void)dir;
-    if (!*name) return -1;
     uint32_t pid = 0;
-    for (const char *s = name; *s; s++) {
-        if (*s < '0' || *s > '9') return -1;
-        pid = pid * 10 + (uint32_t)(*s - '0');
-    }
+    if (parse_pid(name, &pid) < 0) return -1;
     return process_kill(pid);
 }
 

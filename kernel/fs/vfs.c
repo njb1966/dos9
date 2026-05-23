@@ -79,7 +79,13 @@ static int root_readdir(vnode_t *dir, uint32_t idx,
         if (mounts[i].path[0] != '/' || mounts[i].path[1] == '\0') continue;
         if (has_slash(mounts[i].path + 1)) continue;
         if (seen == idx) {
-            strncpy(name_out, mounts[i].path + 1, nmax);
+            if (nmax == 0) return -1;
+            uint32_t j = 0;
+            while (j + 1 < nmax && mounts[i].path[1 + j]) {
+                name_out[j] = mounts[i].path[1 + j];
+                j++;
+            }
+            name_out[j] = '\0';
             return 0;
         }
         seen++;
@@ -109,8 +115,10 @@ vnode_t *vfs_lookup(const char *path) {
     while (*rem) {
         char name[128];
         uint32_t i = 0;
-        while (*rem && *rem != '/' && i < sizeof(name) - 1)
+        while (*rem && *rem != '/') {
+            if (i >= sizeof(name) - 1) return NULL;
             name[i++] = *rem++;
+        }
         name[i] = '\0';
         if (*rem == '/') rem++;
         if (!name[0]) continue;             /* skip empty (trailing slash) */
@@ -214,8 +222,10 @@ int vfs_open(const char *path, int flags) {
     }
 
     if (v->ops && v->ops->open) {
-        int r = v->ops->open(v, flags);
+        vnode_t *opened = v;
+        int r = v->ops->open(&opened, flags);
         if (r < 0) return -1;
+        if (opened) v = opened;
     }
     return fd_alloc(process_current_fds(), v, flags);
 }
@@ -285,16 +295,16 @@ int vfs_lseek(int fd, int32_t offset, int whence) {
     if (!f->open) return -1;
     if (f->vnode->type == VTYPE_CHR) return -1;    /* character devices not seekable */
 
-    int32_t new_off;
+    int64_t new_off;
     switch (whence) {
-    case SEEK_SET: new_off = offset;                                 break;
-    case SEEK_CUR: new_off = (int32_t)f->offset + offset;           break;
-    case SEEK_END: new_off = (int32_t)f->vnode->size + offset;      break;
+    case SEEK_SET: new_off = (int64_t)offset;                        break;
+    case SEEK_CUR: new_off = (int64_t)f->offset + (int64_t)offset;   break;
+    case SEEK_END: new_off = (int64_t)f->vnode->size + (int64_t)offset; break;
     default: return -1;
     }
-    if (new_off < 0) return -1;
+    if (new_off < 0 || new_off > (int64_t)INT32_MAX) return -1;
     f->offset = (uint32_t)new_off;
-    return new_off;
+    return (int32_t)new_off;
 }
 
 int vfs_readdir(int fd, uint32_t idx, char *name_out, uint32_t nmax) {

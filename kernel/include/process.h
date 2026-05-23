@@ -8,6 +8,7 @@
 #define PROC_RUNNING  0
 #define PROC_READY    1
 #define PROC_DEAD     2
+#define PROC_BLOCKED  3  /* blocked in a kernel wait; not runnable */
 
 /*
  * Per-process state.
@@ -42,5 +43,6 @@ int        process_count(void);
 process_t *process_get(int idx);
 int        process_kill(uint32_t pid);
 uint32_t   process_getpid(void);
+uint32_t   process_ticks(void);
 file_t    *process_current_fds(void);
 process_t *process_current(void);

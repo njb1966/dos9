@@ -23,6 +23,20 @@ static uint32_t uint_to_str(uint32_t n, char *buf) {
     return i;
 }
 
+static int parse_idx(const char *name, uint32_t *out) {
+    uint32_t v = 0;
+    if (!name || !*name) return -1;
+    while (*name >= '0' && *name <= '9') {
+        uint32_t digit = (uint32_t)(*name++ - '0');
+        if (v > 429496729u || (v == 429496729u && digit > 5u))
+            return -1;
+        v = v * 10u + digit;
+    }
+    if (*name != '\0') return -1;
+    *out = v;
+    return 0;
+}
+
 /* ── /mod/<N> file ───────────────────────────────────────────────────── */
 
 static int mod_read(vnode_t *v, void *buf, uint32_t off, uint32_t len) {
@@ -45,11 +59,7 @@ static fs_ops_t mod_file_ops = { .read = mod_read };
 static vnode_t *modfs_lookup(vnode_t *dir, const char *name) {
     (void)dir;
     uint32_t idx = 0;
-    if (!*name) return NULL;
-    for (const char *s = name; *s; s++) {
-        if (*s < '0' || *s > '9') return NULL;
-        idx = idx * 10 + (uint32_t)(*s - '0');
-    }
+    if (parse_idx(name, &idx) < 0) return NULL;
     if (idx >= pmm_mod_count() || idx >= MAX_MOD_FILES) return NULL;
     return &mod_files[idx];
 }
@@ -62,7 +72,13 @@ static int modfs_readdir(vnode_t *dir, uint32_t idx,
     if (idx >= n) return -1;
     char buf[12];
     uint_to_str(idx, buf);
-    strncpy(name_out, buf, nmax);
+    if (nmax == 0) return -1;
+    uint32_t i = 0;
+    while (i + 1 < nmax && buf[i]) {
+        name_out[i] = buf[i];
+        i++;
+    }
+    name_out[i] = '\0';
     return 0;
 }
 

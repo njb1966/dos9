@@ -1,0 +1,22 @@
+echo "shellreg start"
+/disk/pkg info /disk/hello.d9p
+if true
+echo if-ok
+end
+for item in alpha "beta gamma"
+echo "$item"
+end
+set foo "a b"
+echo "$foo"
+echo a\ b
+/disk/time
+/disk/fmt
+/disk/alloc
+/disk/argv "" tail
+/disk/argv one "two words" three
+/disk/hello
+rm /disk/hello
+/disk/pkg install /disk/hello.d9p
+/disk/hello
+/disk/hello | /disk/cat
+echo "shellreg end"

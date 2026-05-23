@@ -46,23 +46,26 @@ void pci_enable_busmaster(uint8_t bus, uint8_t dev, uint8_t func) {
 }
 
 int pci_find_device(uint16_t vendor, uint16_t device, pci_device_t *out) {
-    for (uint8_t bus = 0; bus < 8; bus++) {
+    for (uint16_t bus = 0; bus < 256; bus++) {
         for (uint8_t dev = 0; dev < 32; dev++) {
-            uint32_t id = pci_read32(bus, dev, 0, 0x00);
-            if ((id & 0xFFFF) != vendor) continue;
-            if ((id >> 16) != device)   continue;
+            for (uint8_t func = 0; func < 8; func++) {
+                uint32_t id = pci_read32((uint8_t)bus, dev, func, 0x00);
+                if ((id & 0xFFFF) != vendor) continue;
+                if ((id >> 16) != device)   continue;
 
-            out->bus       = bus;
-            out->dev       = dev;
-            out->func      = 0;
-            out->vendor_id = vendor;
-            out->device_id = device;
-            out->irq       = pci_read8(bus, dev, 0, 0x3C);
+                out->bus       = (uint8_t)bus;
+                out->dev       = dev;
+                out->func      = func;
+                out->vendor_id = vendor;
+                out->device_id = device;
+                out->irq       = pci_read8((uint8_t)bus, dev, func, 0x3C);
 
-            for (int i = 0; i < 6; i++)
-                out->bar[i] = pci_read32(bus, dev, 0, (uint8_t)(0x10 + i * 4));
+                for (int i = 0; i < 6; i++)
+                    out->bar[i] = pci_read32((uint8_t)bus, dev, func,
+                                              (uint8_t)(0x10 + i * 4));
 
-            return 1;
+                return 1;
+            }
         }
     }
     return 0;

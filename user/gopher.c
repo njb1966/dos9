@@ -76,7 +76,22 @@ static int resolve_hostname(const char *hostname, char *out, int outlen) {
     out[n] = '\0';
     for (int i = 0; i < n; i++) if (out[i] == '\n') { out[i] = '\0'; break; }
     /* /net/resolve returns "error" on failure */
-    if (out[0] == 'e' && out[1] == 'r') return -1;
+    if (strcmp(out, "error") == 0) return -1;
+    return 0;
+}
+
+static int parse_port(const char *s, int *port_out) {
+    uint32_t port = 0;
+    if (!s || !*s) return -1;
+    while (*s >= '0' && *s <= '9') {
+        uint32_t digit = (uint32_t)(*s++ - '0');
+        if (port > 65535u / 10u ||
+            (port == 65535u / 10u && digit > 65535u % 10u)) return -1;
+        port = port * 10u + digit;
+    }
+    if (*s != '\0') return -1;
+    if (port == 0) return -1;
+    *port_out = (int)port;
     return 0;
 }
 
@@ -124,9 +139,16 @@ static int do_gopher(const char *host_ip, int port, const char *selector) {
     /* Manual: "connect " + ip + " " + port + "\n" */
     int j = 0;
     const char *cc = "connect ";
-    while (*cc) cmd[j++] = *cc++;
+    while (*cc) {
+        if (j >= (int)sizeof(cmd) - 1) return 1;
+        cmd[j++] = *cc++;
+    }
     const char *p = host_ip;
-    while (*p) cmd[j++] = *p++;
+    while (*p) {
+        if (j >= (int)sizeof(cmd) - 1) return 1;
+        cmd[j++] = *p++;
+    }
+    if (j >= (int)sizeof(cmd) - 3) return 1;
     cmd[j++] = ' ';
     /* Print port as decimal. */
     char port_str[8];
@@ -134,7 +156,11 @@ static int do_gopher(const char *host_ip, int port, const char *selector) {
     int tmp = port;
     if (tmp == 0) { port_str[plen++] = '0'; }
     else { while (tmp > 0) { port_str[plen++] = (char)('0' + tmp % 10); tmp /= 10; } }
-    for (int i = plen - 1; i >= 0; i--) cmd[j++] = port_str[i];
+    for (int i = plen - 1; i >= 0; i--) {
+        if (j >= (int)sizeof(cmd) - 1) return 1;
+        cmd[j++] = port_str[i];
+    }
+    if (j >= (int)sizeof(cmd) - 1) return 1;
     cmd[j++] = '\n'; cmd[j] = '\0';
 
     /* Step 4: Write connect command to ctl. */
@@ -199,9 +225,10 @@ int main(int argc, const char **argv) {
     const char *selector = "";
 
     if (argc >= 3) {
-        const char *ps = argv[2];
-        port = 0;
-        while (*ps >= '0' && *ps <= '9') { port = port * 10 + (*ps++ - '0'); }
+        if (parse_port(argv[2], &port) < 0) {
+            puts("gopher: invalid port");
+            return 1;
+        }
     }
     if (argc >= 4) selector = argv[3];
 

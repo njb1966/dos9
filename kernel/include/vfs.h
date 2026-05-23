@@ -6,6 +6,7 @@
 #define O_WRONLY  1
 #define O_RDWR    2
 #define O_CREAT   4
+#define O_TRUNC   8
 
 /* vnode types */
 #define VTYPE_FILE 0
@@ -19,7 +20,7 @@ struct vnode;
  * not supported; VFS will return -1 in that case.
  */
 typedef struct fs_ops {
-    int            (*open)(struct vnode *v, int flags);
+    int            (*open)(struct vnode **v, int flags);
     int            (*close)(struct vnode *v);
     int            (*read)(struct vnode *v, void *buf, uint32_t off, uint32_t len);
     int            (*write)(struct vnode *v, const void *buf, uint32_t off, uint32_t len);

@@ -17,23 +17,22 @@ typedef struct pipe {
 /*
  * Each pipe vnode's priv points to a small two-pointer array:
  *   priv[0] = pipe_t*
- *   priv[1] = the OTHER vnode* (read vnode stores write vnode ptr, and vice versa)
+ *   priv[1] = the OTHER vnode* (kept for symmetry, not dereferenced by I/O)
  *
- * The read op uses priv[1] (the write vnode) to check write_vnode->refs == 0
- * as the EOF signal: when all writers have closed, the reader sees end-of-file.
+ * EOF is tracked through pipe_t::open_ends so the reader does not need to
+ * touch the peer vnode after it has been closed and freed.
  */
 
 static int pipe_read_op(vnode_t *v, void *buf, uint32_t off, uint32_t len) {
     (void)off;
     void   **priv = (void **)v->priv;
     pipe_t  *p    = (pipe_t *)priv[0];
-    vnode_t *wv   = (vnode_t *)priv[1];
     uint8_t *dst  = (uint8_t *)buf;
     uint32_t n    = 0;
 
     while (n < len) {
         while (p->head == p->tail) {          /* buffer empty */
-            if (wv->refs == 0) return (int)n; /* all writers closed → EOF */
+            if (p->open_ends < 2) return (int)n; /* all writers closed → EOF */
             schedule();
         }
         dst[n++]  = p->data[p->tail];
@@ -50,8 +49,10 @@ static int pipe_write_op(vnode_t *v, const void *buf, uint32_t off, uint32_t len
     uint32_t       n    = 0;
 
     while (n < len) {
+        if (p->open_ends < 2) return -1;
         uint32_t next = (p->head + 1) % PIPE_BUF;
         while (next == p->tail) {             /* buffer full — yield until drained */
+            if (p->open_ends < 2) return -1;
             schedule();
             next = (p->head + 1) % PIPE_BUF;
         }
@@ -115,11 +116,17 @@ int pipe_create(int fds[2]) {
     wv->ops  = &pipe_write_ops;
 
     fds[0] = vfs_open_vnode(rv, O_RDONLY);
-    fds[1] = vfs_open_vnode(wv, O_WRONLY);
-
-    if (fds[0] < 0 || fds[1] < 0) {
-        if (fds[0] >= 0) vfs_close(fds[0]);
+    if (fds[0] < 0) {
         kfree(p); kfree(rv); kfree(wv); kfree(rp); kfree(wp);
+        return -1;
+    }
+
+    fds[1] = vfs_open_vnode(wv, O_WRONLY);
+    if (fds[1] < 0) {
+        vfs_close(fds[0]);   /* frees rv + rp through pipe_close_op */
+        kfree(wv);
+        kfree(wp);
+        kfree(p);
         return -1;
     }
     return 0;

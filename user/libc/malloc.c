@@ -25,11 +25,13 @@ typedef struct block {
 static block_t *heap_head = NULL;
 
 static uint32_t align8(size_t n) {
+    if (n > (size_t)UINT32_MAX - 7u) return 0;
     return (uint32_t)((n + 7u) & ~7u);
 }
 
 /* Extend the heap with a new block of at least `need` payload bytes. */
 static block_t *heap_extend(uint32_t need) {
+    if (need > (uint32_t)INT32_MAX - (uint32_t)sizeof(block_t)) return NULL;
     uint32_t total = sizeof(block_t) + need;
     block_t *b = (block_t *)sbrk((int32_t)total);
     if ((void *)b == (void *)-1) return NULL;
@@ -52,6 +54,7 @@ static block_t *find_free(uint32_t need) {
 void *malloc(size_t size) {
     if (!size) return NULL;
     uint32_t need = align8(size);
+    if (!need) return NULL;
 
     if (!heap_head) {
         /* First allocation — init from sbrk(0). */
@@ -96,6 +99,7 @@ void free(void *ptr) {
 }
 
 void *calloc(size_t nmemb, size_t size) {
+    if (nmemb && size > (size_t)-1 / nmemb) return NULL;
     size_t total = nmemb * size;
     if (!total) return NULL;
     void *p = malloc(total);
@@ -109,6 +113,7 @@ void *realloc(void *ptr, size_t size) {
 
     block_t *b = (block_t *)ptr - 1;
     uint32_t need = align8(size);
+    if (!need) return NULL;
 
     if (b->size >= need) return ptr;   /* already large enough */
 

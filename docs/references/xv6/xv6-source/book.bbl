@@ -1,0 +1,98 @@
+\begin{thebibliography}{10}
+
+\bibitem{mitre:cves}
+Linux common vulnerabilities and exposures ({CVEs}).
+\newblock \url{https://cve.mitre.org/cgi-bin/cvekey.cgi?keyword=linux}.
+
+\bibitem{riscv:user}
+The {RISC-V} instruction set manual {Volume I}: unprivileged specification
+  {ISA}.
+\newblock
+  \url{https://drive.google.com/file/d/17GeetSnT5wW3xNuAHI95-SI1gPGd5sJ_/view?usp=drive_link},
+  2024.
+
+\bibitem{riscv:priv}
+The {RISC-V} instruction set manual {Volume II}: privileged specification.
+\newblock
+  \url{https://drive.google.com/file/d/1uviu1nH-tScFfgrovvFCrj7Omv8tFtkp/view?usp=drive_link},
+  2024.
+
+\bibitem{boehm04}
+Hans-J Boehm.
+\newblock Threads cannot be implemented as a library.
+\newblock {\em ACM PLDI Conference}, 2005.
+
+\bibitem{dijkstra65}
+Edsger Dijkstra.
+\newblock Cooperating sequential processes.
+\newblock
+  \url{https://www.cs.utexas.edu/users/EWD/transcriptions/EWD01xx/EWD123.html},
+  1965.
+
+\bibitem{herlihy:art}
+Maurice Herlihy and Nir Shavit.
+\newblock {\em The Art of Multiprocessor Programming, Revised Reprint}.
+\newblock 2012.
+
+\bibitem{kernighan}
+Brian~W. Kernighan.
+\newblock {\em The C Programming Language}.
+\newblock Prentice Hall Professional Technical Reference, 2nd edition, 1988.
+
+\bibitem{sel4}
+Gerwin Klein, Kevin Elphinstone, Gernot Heiser, June Andronick, David Cock,
+  Philip Derrin, Dhammika Elkaduwe, Kai Engelhardt, Rafal Kolanski, Michael
+  Norrish, Thomas Sewell, Harvey Tuch, and Simon Winwood.
+\newblock Sel4: Formal verification of an {OS} kernel.
+\newblock In {\em Proceedings of the ACM SIGOPS 22nd Symposium on Operating
+  Systems Principles}, page 207–220, 2009.
+
+\bibitem{knuth}
+Donald Knuth.
+\newblock {\em Fundamental Algorithms. The Art of Computer Programming. (Second
+  ed.)}, volume~1.
+\newblock 1997.
+
+\bibitem{lamport:bakery}
+L~Lamport.
+\newblock A new solution of dijkstra's concurrent programming problem.
+\newblock {\em Communications of the ACM}, 1974.
+
+\bibitem{lions}
+John Lions.
+\newblock {\em Commentary on UNIX 6th Edition}.
+\newblock Peer to Peer Communications, 2000.
+
+\bibitem{mckenney:rcuusage}
+Paul~E. Mckenney, Silas Boyd-wickizer, and Jonathan Walpole.
+\newblock {RCU} usage in the linux kernel: One decade later, 2013.
+
+\bibitem{ns16550a}
+Martin Michael and Daniel Durich.
+\newblock The {NS16550A}: {UART} design and application considerations.
+\newblock
+  \url{http://bitsavers.trailing-edge.com/components/national/_appNotes/AN-0491.pdf},
+  1987.
+
+\bibitem{aleph:smashing}
+Aleph One.
+\newblock Smashing the stack for fun and profit.
+\newblock \url{http://phrack.org/issues/49/14.html#article}.
+
+\bibitem{riscv}
+David Patterson and Andrew Waterman.
+\newblock {\em The {RISC-V} Reader: an open architecture Atlas}.
+\newblock Strawberry Canyon, 2017.
+
+\bibitem{Presotto91plan9}
+Dave Presotto, Rob Pike, Ken Thompson, and Howard Trickey.
+\newblock Plan 9, a distributed system.
+\newblock In {\em In Proceedings of the Spring 1991 EurOpen Conference}, pages
+  43--50, 1991.
+
+\bibitem{unix}
+Dennis~M. Ritchie and Ken Thompson.
+\newblock The {UNIX} time-sharing system.
+\newblock {\em Commun. ACM}, 17(7):365--375, July 1974.
+
+\end{thebibliography}

@@ -11,6 +11,7 @@
 /* In-memory copy of the directory, populated at init time. */
 static diskfs_dirent_t dir[DISKFS_MAX_FILES];
 static uint32_t        n_active = 0;
+static diskfs_super_t  super;
 
 /* One vnode per directory slot (used only for active entries). */
 static vnode_t file_vnodes[DISKFS_MAX_FILES];
@@ -29,12 +30,19 @@ static void diskfs_flush_dir(void) {
     }
 }
 
+static void diskfs_flush_super(void) {
+    uint8_t sb_buf[SECTOR_SIZE];
+    memset(sb_buf, 0, SECTOR_SIZE);
+    memcpy(sb_buf, &super, sizeof(super));
+    ata_write_sector(0, sb_buf);
+}
+
 /* ── file read ─────────────────────────────────────────────────────────── */
 
 static int diskfile_read(vnode_t *v, void *buf, uint32_t off, uint32_t len) {
     diskfs_dirent_t *de = (diskfs_dirent_t *)v->priv;
     if (off >= de->size) return 0;
-    if (off + len > de->size) len = de->size - off;
+    if (len > de->size - off) len = de->size - off;
 
     uint8_t  *dst       = (uint8_t *)buf;
     uint32_t  remaining = len;
@@ -44,7 +52,9 @@ static int diskfile_read(vnode_t *v, void *buf, uint32_t off, uint32_t len) {
     while (remaining > 0) {
         uint32_t sector_idx = cur_off / SECTOR_SIZE;
         uint32_t sector_off = cur_off % SECTOR_SIZE;
-        uint32_t lba        = de->start_lba + sector_idx;
+        uint64_t lba64      = (uint64_t)de->start_lba + (uint64_t)sector_idx;
+        if (lba64 > 0xFFFFFFFFu) return -1;
+        uint32_t lba        = (uint32_t)lba64;
 
         if (ata_read_sector(lba, sector_buf) < 0) return -1;
 
@@ -64,21 +74,57 @@ static int diskfile_read(vnode_t *v, void *buf, uint32_t off, uint32_t len) {
 static int diskfile_write(vnode_t *v, const void *buf,
                            uint32_t off, uint32_t len) {
     diskfs_dirent_t *de = (diskfs_dirent_t *)v->priv;
-    uint32_t max_bytes  = de->alloc_sectors * SECTOR_SIZE;
+    uint64_t max_bytes64 = (uint64_t)de->alloc_sectors * (uint64_t)SECTOR_SIZE;
+    uint32_t max_bytes   = (max_bytes64 > 0xFFFFFFFFu)
+        ? 0xFFFFFFFFu
+        : (uint32_t)max_bytes64;
 
     if (off >= max_bytes) return 0;
-    if (off + len > max_bytes) len = max_bytes - off;
+    if (len > max_bytes - off) len = max_bytes - off;
     if (len == 0) return 0;
 
     const uint8_t *src  = (const uint8_t *)buf;
+    uint8_t  sector_buf[SECTOR_SIZE];
+
+    /* If the caller seeks past EOF and then writes, zero-fill the hole so we
+       do not expose stale bytes from the preallocated region. */
+    if (off > de->size) {
+        uint32_t zero_off = de->size;
+        uint32_t zero_remaining = off - de->size;
+
+        while (zero_remaining > 0) {
+            uint32_t sector_idx = zero_off / SECTOR_SIZE;
+            uint32_t sector_off = zero_off % SECTOR_SIZE;
+            uint64_t lba64      = (uint64_t)de->start_lba + (uint64_t)sector_idx;
+            if (lba64 > 0xFFFFFFFFu) return -1;
+            uint32_t lba        = (uint32_t)lba64;
+
+            if (sector_off != 0 || zero_remaining < SECTOR_SIZE) {
+                if (ata_read_sector(lba, sector_buf) < 0) return -1;
+            } else {
+                memset(sector_buf, 0, SECTOR_SIZE);
+            }
+
+            uint32_t to_zero = SECTOR_SIZE - sector_off;
+            if (to_zero > zero_remaining) to_zero = zero_remaining;
+            memset(sector_buf + sector_off, 0, to_zero);
+
+            if (ata_write_sector(lba, sector_buf) < 0) return -1;
+
+            zero_off       += to_zero;
+            zero_remaining -= to_zero;
+        }
+    }
+
     uint32_t remaining  = len;
     uint32_t cur_off    = off;
-    uint8_t  sector_buf[SECTOR_SIZE];
 
     while (remaining > 0) {
         uint32_t sector_idx = cur_off / SECTOR_SIZE;
         uint32_t sector_off = cur_off % SECTOR_SIZE;
-        uint32_t lba        = de->start_lba + sector_idx;
+        uint64_t lba64      = (uint64_t)de->start_lba + (uint64_t)sector_idx;
+        if (lba64 > 0xFFFFFFFFu) return -1;
+        uint32_t lba        = (uint32_t)lba64;
 
         if (sector_off != 0 || remaining < SECTOR_SIZE) {
             if (ata_read_sector(lba, sector_buf) < 0) return -1;
@@ -127,7 +173,13 @@ static int diskdir_readdir(vnode_t *d, uint32_t idx,
     for (uint32_t i = 0; i < DISKFS_MAX_FILES; i++) {
         if (!(dir[i].flags & DISKFS_FLAG_ACTIVE)) continue;
         if (seen == idx) {
-            strncpy(name_out, dir[i].name, nmax);
+            if (nmax == 0) return -1;
+            uint32_t j = 0;
+            while (j + 1 < nmax && dir[i].name[j]) {
+                name_out[j] = dir[i].name[j];
+                j++;
+            }
+            name_out[j] = '\0';
             return 0;
         }
         seen++;
@@ -154,6 +206,7 @@ static vnode_t *diskdir_create(vnode_t *d, const char *name) {
         if (!(dir[i].flags & DISKFS_FLAG_ACTIVE)) { slot = i; break; }
     }
     if (slot == DISKFS_MAX_FILES) return NULL;
+    if (next_free_lba > 0xFFFFFFFFu - DISKFS_PREALLOC_SECTORS) return NULL;
 
     for (uint32_t i = 0; i < nlen; i++) dir[slot].name[i] = name[i];
     dir[slot].name[nlen]      = '\0';
@@ -164,6 +217,7 @@ static vnode_t *diskdir_create(vnode_t *d, const char *name) {
 
     next_free_lba += DISKFS_PREALLOC_SECTORS;
     n_active++;
+    super.n_files = n_active;
 
     file_vnodes[slot].type = VTYPE_FILE;
     file_vnodes[slot].size = 0;
@@ -172,6 +226,7 @@ static vnode_t *diskdir_create(vnode_t *d, const char *name) {
     file_vnodes[slot].refs = 0;
 
     diskfs_flush_dir();
+    diskfs_flush_super();
     return &file_vnodes[slot];
 }
 
@@ -201,6 +256,7 @@ void diskfs_init(void) {
         terminal_write("[DISKFS] no DOS9FS signature — disk not formatted\n");
         return;
     }
+    super = *sb;
 
     /* Read directory sectors (1–4). */
     uint8_t dir_buf[4 * SECTOR_SIZE];
@@ -230,9 +286,13 @@ void diskfs_init(void) {
     next_free_lba = DISKFS_DATA_START;
     for (uint32_t i = 0; i < DISKFS_MAX_FILES; i++) {
         if (!(dir[i].flags & DISKFS_FLAG_ACTIVE)) continue;
-        uint32_t end = dir[i].start_lba + dir[i].alloc_sectors;
+        uint64_t end64 = (uint64_t)dir[i].start_lba + (uint64_t)dir[i].alloc_sectors;
+        uint32_t end = (end64 > 0xFFFFFFFFu) ? 0xFFFFFFFFu : (uint32_t)end64;
         if (end > next_free_lba) next_free_lba = end;
     }
+    super.n_files = n_active;
+    super.data_start = DISKFS_DATA_START;
+    diskfs_flush_super();
 
     vfs_mount("/disk", &diskdir_vnode);
 

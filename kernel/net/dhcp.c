@@ -16,6 +16,7 @@
 #define OPT_REQIP       50
 #define OPT_SUBNET      1
 #define OPT_GATEWAY     3
+#define OPT_DNS         6
 #define OPT_PARAMREQ    55
 #define OPT_END         255
 
@@ -36,12 +37,14 @@ typedef struct {
     uint8_t  options[64];
 } __attribute__((packed)) dhcp_pkt_t;
 
-static int      g_done   = 0;
+static volatile int g_done   = 0;
 static uint32_t g_offer_ip;
 static uint32_t g_server_ip;
 
-static uint8_t *opt_append(uint8_t *p, uint8_t code, uint8_t len,
+static uint8_t *opt_append(uint8_t *p, const uint8_t *end,
+                            uint8_t code, uint8_t len,
                             const uint8_t *data) {
+    if ((uint32_t)(end - p) < (uint32_t)(2u + len)) return NULL;
     *p++ = code;
     *p++ = len;
     while (len--) *p++ = *data++;
@@ -64,20 +67,26 @@ static void dhcp_send(uint8_t msgtype, uint32_t ciaddr,
 
     uint8_t *opt = p.options;
     uint8_t  mt  = msgtype;
-    opt = opt_append(opt, OPT_MSGTYPE, 1, &mt);
+    uint8_t *opt_end = p.options + sizeof(p.options);
+    opt = opt_append(opt, opt_end, OPT_MSGTYPE, 1, &mt);
+    if (!opt) return;
 
     if (req_ip) {
         uint32_t rip = htonl(req_ip);
-        opt = opt_append(opt, OPT_REQIP, 4, (uint8_t *)&rip);
+        opt = opt_append(opt, opt_end, OPT_REQIP, 4, (uint8_t *)&rip);
+        if (!opt) return;
     }
     if (server_ip) {
         uint32_t sip = htonl(server_ip);
-        opt = opt_append(opt, OPT_SERVERID, 4, (uint8_t *)&sip);
+        opt = opt_append(opt, opt_end, OPT_SERVERID, 4, (uint8_t *)&sip);
+        if (!opt) return;
     }
     if (msgtype == MSGTYPE_DISCOVER) {
-        uint8_t params[] = { OPT_SUBNET, OPT_GATEWAY };
-        opt = opt_append(opt, OPT_PARAMREQ, sizeof(params), params);
+        uint8_t params[] = { OPT_SUBNET, OPT_GATEWAY, OPT_DNS };
+        opt = opt_append(opt, opt_end, OPT_PARAMREQ, sizeof(params), params);
+        if (!opt) return;
     }
+    if (opt >= opt_end) return;
     *opt++ = OPT_END;
 
     udp_send(0xFFFFFFFFu, DHCP_CLIENT_PORT, DHCP_SERVER_PORT,
@@ -96,14 +105,17 @@ static void dhcp_rx(const void *payload, uint16_t len,
     /* Parse options. */
     uint8_t msgtype = 0;
     uint32_t subnet  = 0, gateway = 0;
+    uint32_t dns     = 0;
     uint32_t server  = src_ip;
 
     const uint8_t *opt = p->options;
     const uint8_t *end = p->options + 64;
     while (opt < end && *opt != OPT_END) {
         uint8_t code = *opt++;
+        if (code == 0) continue;  /* PAD */
         if (opt >= end) break;
         uint8_t olen = *opt++;
+        if (olen == 0) break;
         if (opt + olen > end) break;
 
         switch (code) {
@@ -116,13 +128,22 @@ static void dhcp_rx(const void *payload, uint16_t len,
             gateway = ((uint32_t)opt[0]<<24)|((uint32_t)opt[1]<<16)
                      |((uint32_t)opt[2]<<8)|opt[3];
             break;
+        case OPT_DNS:
+            dns = ((uint32_t)opt[0]<<24)|((uint32_t)opt[1]<<16)
+                |((uint32_t)opt[2]<<8)|opt[3];
+            break;
         case OPT_SERVERID:
             server = ((uint32_t)opt[0]<<24)|((uint32_t)opt[1]<<16)
                     |((uint32_t)opt[2]<<8)|opt[3];
             break;
+        default:
+            break;
         }
         opt += olen;
     }
+
+    if (opt >= end) return;
+    if (*opt != OPT_END) return;
 
     if (msgtype == MSGTYPE_OFFER) {
         g_offer_ip  = ntohl(p->yiaddr);
@@ -132,7 +153,8 @@ static void dhcp_rx(const void *payload, uint16_t len,
     } else if (msgtype == MSGTYPE_ACK) {
         g_netif.ip      = ntohl(p->yiaddr);
         g_netif.netmask = subnet  ? subnet  : IP4(255,255,255,0);
-        g_netif.gateway = gateway ? gateway : IP4(10,0,2,2);
+        g_netif.gateway = gateway;
+        g_netif.dns     = dns;
         g_netif.up      = 1;
         g_done          = 1;
 

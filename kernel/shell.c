@@ -15,10 +15,13 @@
 
 static char line[LINE_MAX];
 
-/* Return pointer past prefix+spaces in str, or NULL if prefix doesn't match. */
+/* Return pointer past prefix+spaces in str, or NULL if prefix doesn't match.
+   The command must end at a space or NUL so we do not accept prefixes like
+   "echoabc" as "echo". */
 static const char *match(const char *str, const char *prefix) {
     while (*prefix && *str == *prefix) { str++; prefix++; }
     if (*prefix) return NULL;
+    if (*str && *str != ' ') return NULL;
     while (*str == ' ') str++;
     return str;
 }

@@ -6,6 +6,34 @@
 #define KBD_PORT     0x60
 #define KBD_BUF_SIZE 256
 
+/* COM1 serial fallback — lets QEMU -nographic pipe input to the shell */
+#define COM1_BASE    0x3F8
+static int com1_present;
+
+static int com1_probe(void) {
+    uint8_t ier = inb(COM1_BASE + 1);
+    uint8_t lcr = inb(COM1_BASE + 3);
+    uint8_t mcr = inb(COM1_BASE + 4);
+
+    outb(COM1_BASE + 7, 0x55);
+    if (inb(COM1_BASE + 7) != 0x55) {
+        outb(COM1_BASE + 1, ier);
+        outb(COM1_BASE + 3, lcr);
+        outb(COM1_BASE + 4, mcr);
+        return 0;
+    }
+
+    outb(COM1_BASE + 1, ier);
+    outb(COM1_BASE + 3, lcr);
+    outb(COM1_BASE + 4, mcr);
+    return 1;
+}
+
+static inline int  com1_has(void)  {
+    return com1_present && (inb(COM1_BASE + 5) & 0x01);
+}
+static inline char com1_get(void)  { return (char)inb(COM1_BASE); }
+
 /* Scancode set 1 — unshifted */
 static const char sc_normal[128] = {
     0,    27,  '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=',
@@ -80,18 +108,22 @@ static void kbd_irq_handler(struct registers *r) {
 }
 
 void keyboard_init(void) {
+    com1_present = com1_probe();
     irq_register(IRQ_KEYBOARD, kbd_irq_handler);
 }
 
 int kbd_haschar(void) {
-    return kbd_head != kbd_tail;
+    return (kbd_head != kbd_tail) || com1_has();
 }
 
 char kbd_getchar(void) {
     while (!kbd_haschar())
         __asm__ volatile("sti; hlt");
 
-    char ch = kbd_buf[kbd_tail];
-    kbd_tail = (kbd_tail + 1) & (KBD_BUF_SIZE - 1);
-    return ch;
+    if (kbd_head != kbd_tail) {
+        char ch = kbd_buf[kbd_tail];
+        kbd_tail = (kbd_tail + 1) & (KBD_BUF_SIZE - 1);
+        return ch;
+    }
+    return com1_get();
 }

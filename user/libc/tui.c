@@ -30,6 +30,10 @@ void tui_clrline(void) { tui_write("\x1b[2K", 4); }
 void tui_move(int row, int col) {
     char buf[16];
     int n = 0;
+    if (row < 0) row = 0;
+    else if (row >= TUI_ROWS) row = TUI_ROWS - 1;
+    if (col < 0) col = 0;
+    else if (col >= TUI_COLS) col = TUI_COLS - 1;
     buf[n++] = '\x1b'; buf[n++] = '[';
     put_dec(buf, &n, row + 1);
     buf[n++] = ';';
@@ -78,7 +82,12 @@ void tui_puts(int row, int col, const char *s, int fg, int bg) {
 
 void tui_fill(int row, int col, int h, int w, char c, int fg, int bg) {
     char line[TUI_COLS];
-    if (w > TUI_COLS) w = TUI_COLS;
+    if (h <= 0 || w <= 0) return;
+    if (col < 0 || col >= TUI_COLS) return;
+    if (row < 0 || row >= TUI_ROWS) return;
+    if (h > TUI_ROWS - row) h = TUI_ROWS - row;
+    if (w > TUI_COLS - col) w = TUI_COLS - col;
+    if (w <= 0) return;
     for (int x = 0; x < w; x++) line[x] = c;
 
     tui_color(fg, bg);
@@ -92,6 +101,12 @@ void tui_fill(int row, int col, int h, int w, char c, int fg, int bg) {
 
 void tui_box(int row, int col, int h, int w, int fg, int bg) {
     if (h < 2 || w < 2) return;
+    if (col < 0 || col >= TUI_COLS) return;
+    if (row < 0 || row >= TUI_ROWS) return;
+    if (h > TUI_ROWS - row) h = TUI_ROWS - row;
+    if (h < 2) return;
+    if (w > TUI_COLS - col) w = TUI_COLS - col;
+    if (w < 2) return;
 
     char line[TUI_COLS + 2];
     int i, inner = w - 2;

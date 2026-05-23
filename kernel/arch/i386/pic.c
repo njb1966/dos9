@@ -70,6 +70,7 @@ void pic_unmask_irq(int irq) {
 /* Called from irq_common in isr.S */
 void irq_handler(struct registers *r) {
     int irq = r->int_no - IRQ_BASE_MASTER;
+    if (irq < 0 || irq >= 16) return;
     /*
      * Send EOI before dispatching.  If the handler does a context switch
      * and never returns on this stack (scheduler), the PIC is still

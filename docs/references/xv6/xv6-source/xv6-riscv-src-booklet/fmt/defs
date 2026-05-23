@@ -1,0 +1,444 @@
+0904 uint8
+0905 uint16
+0906 uint32
+0907 uint64
+0909 pde_t
+0150 NPROC 64
+0151 NCPU 8
+0152 NOFILE 16
+0153 NFILE 100
+0154 NINODE 50
+0155 NDEV 10
+0156 ROOTDEV 1
+0157 MAXARG 32
+0158 MAXOPBLOCKS 10
+0159 LOGBLOCKS
+0160 NBUF
+0161 FSSIZE 2000
+0162 MAXPATH 128
+0163 USERSTACK 1
+0220 UART0 0x10000000L
+0221 UART0_IRQ 10
+0224 VIRTIO0 0x10001000
+0225 VIRTIO0_IRQ 1
+0228 PLIC 0x0c000000L
+0229 PLIC_PRIORITY
+0230 PLIC_PENDING
+0231 PLIC_SENABLE
+0232 PLIC_SPRIORITY
+0233 PLIC_SCLAIM
+0238 KERNBASE 0x80000000L
+0239 PHYSTOP
+0243 TRAMPOLINE
+0247 KSTACK
+0259 TRAPFRAME
+0484 NELEM
+0513 MSTATUS_MPP_MASK
+0514 MSTATUS_MPP_M
+0515 MSTATUS_MPP_S
+0516 MSTATUS_MPP_U
+0552 SSTATUS_SPP
+0553 SSTATUS_SPIE
+0554 SSTATUS_UPIE
+0555 SSTATUS_SIE
+0556 SSTATUS_UIE
+0588 SIE_SEIE
+0589 SIE_STIE
+0607 MIE_STIE
+0738 SATP_SV39
+0740 MAKE_SATP
+0866 pte_t
+0871 PGSIZE 4096
+0872 PGSHIFT 12
+0874 PGROUNDUP
+0875 PGROUNDDOWN
+0877 PTE_V
+0878 PTE_R
+0879 PTE_W
+0880 PTE_X
+0881 PTE_U
+0884 PA2PTE
+0886 PTE2PA
+0888 PTE_FLAGS
+0891 PXMASK 0x1FF
+0892 PXSHIFT
+0893 PX
+0899 MAXVA
+0904 uint8
+0905 uint16
+0906 uint32
+0907 uint64
+0909 pde_t
+0952 ELF_MAGIC 0x464C457FU
+0955 elfhdr
+0974 proghdr
+0986 ELF_PROG_LOAD 1
+0989 ELF_PROG_FLAG_EXEC 1
+0990 ELF_PROG_FLAG_WRITE 2
+0991 ELF_PROG_FLAG_READ 4
+1156 started
+1201 spinlock
+1413 kernel_pagetable
+1951 context
+1971 cpu
+1992 trapframe
+2031 RUNNING
+2034 proc
+2114 nextpid
+2115 pid_lock
+2126 wait_lock
+2908 swtch
+2966 run
+3068 trampoline
+3071 uservec
+3151 userret
+3211 kernelvec
+3308 tickslock
+3309 ticks
+3551 SYS_fork 1
+3552 SYS_exit 2
+3553 SYS_wait 3
+3554 SYS_pipe 4
+3555 SYS_read 5
+3556 SYS_kill 6
+3557 SYS_exec 7
+3558 SYS_fstat 8
+3559 SYS_chdir 9
+3560 SYS_dup 10
+3561 SYS_getpid 11
+3562 SYS_sbrk 12
+3563 SYS_pause 13
+3564 SYS_uptime 14
+3565 SYS_open 15
+3566 SYS_write 16
+3567 SYS_mknod 17
+3568 SYS_unlink 18
+3569 SYS_link 19
+3570 SYS_mkdir 20
+3571 SYS_close 21
+3900 buf
+3951 sleeplock
+4000 O_RDONLY 0x000
+4001 O_WRONLY 0x001
+4002 O_RDWR 0x002
+4003 O_CREATE 0x200
+4004 O_TRUNC 0x400
+4050 T_DIR 1
+4051 T_FILE 2
+4052 T_DEVICE 3
+4054 stat
+4104 ROOTINO 1
+4105 BSIZE 1024
+4113 superblock
+4124 FSMAGIC 0x10203040
+4126 NDIRECT 12
+4127 NINDIRECT
+4128 MAXFILE
+4131 dinode
+4151 IPB
+4154 IBLOCK
+4157 BPB
+4160 BBLOCK
+4163 DIRSIZ 14
+4167 dirent
+4200 file
+4211 major
+4212 minor
+4213 mkdev
+4216 inode
+4232 devsw
+4239 CONSOLE 1
+4584 logheader
+4589 log
+4600 log
+4873 min
+4876 sb
+6610 PIPESIZE 512
+6612 pipe
+6974 BACKSPACE 0x100
+6975 C
+7004 INPUT_BUF_SIZE 128
+7215 Reg
+7217 ReadReg
+7218 WriteReg
+7223 RHR 0
+7224 THR 0
+7225 IER 1
+7226 IER_RX_ENABLE
+7227 IER_TX_ENABLE
+7228 FCR 2
+7229 FCR_FIFO_ENABLE
+7230 FCR_FIFO_CLEAR
+7231 ISR 2
+7232 LCR 3
+7233 LCR_EIGHT_BITS
+7234 LCR_BAUD_LATCH
+7235 LSR 5
+7236 LSR_RX_READY
+7237 LSR_TX_IDLE
+7240 tx_lock
+7241 tx_busy
+7242 tx_chan
+7419 R
+7857 EXEC 1
+7858 REDIR 2
+7859 PIPE 3
+7860 LIST 4
+7861 BACK 5
+7863 MAXARGS 10
+7865 cmd
+7869 execcmd
+7875 redircmd
+7884 pipecmd
+7890 listcmd
+7896 backcmd
+0504 r_mhartid
+0519 r_mstatus
+0527 w_mstatus
+0536 w_mepc
+0559 r_sstatus
+0567 w_sstatus
+0574 r_sip
+0582 w_sip
+0591 r_sie
+0601 w_sie
+0609 r_mie
+0617 w_mie
+0626 w_sepc
+0632 r_sepc
+0641 r_medeleg
+0651 w_medeleg
+0658 r_mideleg
+0666 w_mideleg
+0674 w_stvec
+0680 r_stvec
+0689 r_stimecmp
+0701 w_stimecmp
+0709 r_menvcfg
+0718 w_menvcfg
+0726 w_pmpcfg0
+0732 w_pmpaddr0
+0745 w_satp
+0751 r_satp
+0760 r_scause
+0769 r_stval
+0778 w_mcounteren
+0784 r_mcounteren
+0793 r_time
+0802 intr_on
+0809 intr_off
+0816 intr_get
+0823 r_sp
+0833 r_tp
+0841 w_tp
+0851 r_ra
+0860 sfence_vma
+1064 start
+1102 timerinit
+1261 initlock
+1271 acquire
+1302 release
+1332 holding
+1355 push_off
+1369 pop_off
+1421 kvmmake
+1457 kvmmap
+1465 kvminit
+1473 kvminithart
+1497 walk
+1520 walkaddr
+1556 mappages
+1589 uvmcreate
+1604 uvmunmap
+1628 uvmalloc
+1658 uvmdealloc
+1674 freewalk
+1694 uvmfree
+1707 uvmcopy
+1739 uvmclear
+1754 copyout
+1804 copyin
+1833 copyinstr
+1879 vmfault
+1901 ismapped
+2132 proc_mapstacks
+2152 procinit
+2169 cpuid
+2178 mycpu
+2187 myproc
+2201 allocpid
+2218 allocproc
+2263 freeproc
+2284 proc_pagetable
+2318 proc_freepagetable
+2327 userinit
+2353 growproc
+2376 kfork
+2426 reparent
+2454 kexit
+2503 kwait
+2558 scheduler
+2608 sched
+2629 yield
+2653 forkret
+2703 sleep
+2734 wakeup
+2754 kkill
+2775 setkilled
+2783 killed
+2804 either_copyout
+2819 either_copyin
+2834 procdump
+2976 kinit
+2983 freerange
+3005 kfree
+3027 kalloc
+3319 trapinit
+3326 trapinithart
+3337 usertrap
+3404 prepare_return
+3453 kerneltrap
+3482 clockintr
+3506 devintr
+3611 fetchaddr
+3624 fetchstr
+3633 argraw
+3656 argint
+3665 argaddr
+3674 argstr
+3731 syscall
+3760 sys_exit
+3769 sys_getpid
+3775 sys_fork
+3781 sys_wait
+3801 sys_sbrk
+3829 sys_pause
+3851 sys_kill
+3862 sys_uptime
+4286 binit
+4308 bget
+4352 bread
+4366 bwrite
+4376 brelse
+4401 bpin
+4408 bunpin
+4462 initsleeplock
+4471 acquiresleep
+4483 releasesleep
+4501 holdingsleep
+4606 initlog
+4619 install_trans
+4652 read_head
+4668 write_head
+4682 recover_from_log
+4702 begin_op
+4722 end_op
+4754 write_log
+4769 commit
+4790 log_write
+4880 readsb
+4891 fsinit
+4902 bzero
+4917 balloc
+4952 bfree
+5042 iinit
+5059 ialloc
+5086 iupdate
+5107 iget
+5142 idup
+5153 ilock
+5181 iunlock
+5208 iput
+5237 iunlockput
+5251 ireclaim
+5283 bmap
+5327 itrunc
+5359 stati
+5373 readi
+5408 writei
+5446 namecmp
+5453 dirlookup
+5481 dirlink
+5523 skipelem
+5555 namex
+5590 namei
+5601 nameiparent
+5672 fileinit
+5679 filealloc
+5702 filedup
+5714 fileclose
+5753 filestat
+5772 fileread
+5803 filewrite
+5871 argfd
+5903 fdalloc
+5918 sys_dup
+5932 sys_read
+5951 sys_write
+5966 sys_close
+5979 sys_fstat
+6002 sys_link
+6052 isdirempty
+6067 sys_unlink
+6124 create
+6185 sys_open
+6254 sys_mkdir
+6270 sys_mknod
+6301 sys_chdir
+6326 sys_exec
+6369 sys_pipe
+6426 kexec
+6555 loadseg
+6622 pipealloc
+6661 pipeclose
+6679 pipewrite
+6708 piperead
+6753 memset
+6764 memcmp
+6780 memmove
+6805 memcpy
+6811 strncmp
+6821 strncpy
+6835 safestrcpy
+6851 strlen
+6911 plicinit
+6919 plicinithart
+6933 plic_claim
+6942 plic_complete
+6984 consputc
+7016 consolewrite
+7041 consoleread
+7107 consoleintr
+7154 consoleinit
+7251 uartinit
+7282 uartwrite
+7309 uartputc_sync
+7331 uartgetc
+7354 uartintr
+7461 virtio_disk_init
+7555 alloc_desc
+7568 free_desc
+7584 free_chain
+7603 alloc3_desc
+7617 virtio_disk_rw
+7701 virtio_disk_intr
+7907 runcmd
+7984 getcmd
+8036 panic
+8051 fork1
+8103 execcmd
+8114 redircmd
+8130 pipecmd
+8151 listcmd
+8164 backcmd
+8206 gettoken
+8251 peek
+8268 parsecmd
+8285 parseline
+8301 parsepipe
+8314 parseredirs
+8351 parseblock
+8367 parseexec
+8402 nulterminate
+8450 OUTPUT_ARCH
+8451 ENTRY

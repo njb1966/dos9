@@ -37,6 +37,12 @@ void vmm_init(void) {
        PT entry j covers the physical frame (k*1024 + j). */
     uint32_t total    = pmm_total_frames();
     uint32_t pt_count = (total + PT_ENTRIES - 1) / PT_ENTRIES;
+    uint32_t max_pt   = PD_ENTRIES - KERNEL_PD_IDX;
+    if (pt_count > max_pt) {
+        pt_count = max_pt;
+        total = max_pt * PT_ENTRIES;
+        terminal_write("[VMM] RAM capped at 1GB linear map\n");
+    }
 
     for (uint32_t k = 0; k < pt_count; k++) {
         uint32_t pt_phys = (uint32_t)pmm_alloc_frame();
@@ -62,14 +68,15 @@ void vmm_init(void) {
 
 uint32_t vmm_get_kernel_pd(void) { return kernel_pd_phys; }
 
-void vmm_map_page_in(uint32_t pd_phys, uint32_t vaddr,
-                     uint32_t paddr, uint32_t flags) {
+int vmm_map_page_in(uint32_t pd_phys, uint32_t vaddr,
+                    uint32_t paddr, uint32_t flags) {
     uint32_t *pd    = (uint32_t *)VIRT(pd_phys);
     uint32_t pd_idx = vaddr >> 22;
     uint32_t pt_idx = (vaddr >> 12) & 0x3FFu;
 
     if (!(pd[pd_idx] & PF_PRESENT)) {
         uint32_t pt_phys = (uint32_t)pmm_alloc_frame();
+        if (!pt_phys) return -1;
         uint32_t *pt     = (uint32_t *)VIRT(pt_phys);
         for (uint32_t i = 0; i < PT_ENTRIES; i++) pt[i] = 0;
         /* Propagate PF_USER to the PD entry so user-mode can access the PT. */
@@ -85,10 +92,13 @@ void vmm_map_page_in(uint32_t pd_phys, uint32_t vaddr,
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (cr3 == pd_phys)
         __asm__ volatile("invlpg (%0)" :: "r"(vaddr) : "memory");
+
+    return 0;
 }
 
 uint32_t vmm_create_user_pd(void) {
     uint32_t pd_phys   = (uint32_t)pmm_alloc_frame();
+    if (!pd_phys) return 0;
     uint32_t *pd       = (uint32_t *)VIRT(pd_phys);
     uint32_t *kpd      = (uint32_t *)VIRT(kernel_pd_phys);
 
@@ -111,5 +121,5 @@ uint32_t vmm_create_user_pd(void) {
 void vmm_map_page(uint32_t vaddr, uint32_t paddr, uint32_t flags) {
     uint32_t pd_phys;
     __asm__ volatile("mov %%cr3, %0" : "=r"(pd_phys));
-    vmm_map_page_in(pd_phys, vaddr, paddr, flags);
+    (void)vmm_map_page_in(pd_phys, vaddr, paddr, flags);
 }

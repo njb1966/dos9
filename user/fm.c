@@ -63,17 +63,29 @@ static int   active;     /* 0 = left, 1 = right */
 
 /* ── Path helpers ────────────────────────────────────────────────────── */
 
-/* Append "/" + name to base in-place (or into separate out buffer). */
-static void path_join(char *out, const char *base, const char *name, int maxn) {
+/* Append "/" + name to base. Returns 0 on success, -1 if the result would
+   not fit in `out`. */
+static int path_join(char *out, const char *base, const char *name, int maxn) {
+    char tmp[PATH_SZ];
     int i = 0;
+    if (maxn > PATH_SZ) return -1;
     if (base[0] == '/' && base[1] == '\0') {
-        out[i++] = '/';
+        tmp[i++] = '/';
     } else {
-        for (; base[i] && i < maxn - 2; i++) out[i] = base[i];
-        if (i < maxn - 2) out[i++] = '/';
+        for (; base[i]; i++) {
+            if (i >= maxn - 2) return -1;
+            tmp[i] = base[i];
+        }
+        if (i >= maxn - 2) return -1;
+        tmp[i++] = '/';
     }
-    for (int j = 0; name[j] && i < maxn - 1; j++) out[i++] = name[j];
-    out[i] = '\0';
+    for (int j = 0; name[j]; j++) {
+        if (i >= maxn - 1) return -1;
+        tmp[i++] = name[j];
+    }
+    tmp[i] = '\0';
+    memcpy(out, tmp, (size_t)(i + 1));
+    return 0;
 }
 
 /* Truncate path to its parent in-place. */
@@ -123,14 +135,18 @@ static void load_panel(Panel *p) {
     if (fd < 0) return;
 
     for (int idx = 0; p->count < MAX_ENTRIES; idx++) {
-        char buf[NAME_SZ];
-        if (readdir(fd, (uint32_t)idx, buf, NAME_SZ) <= 0) break;
-
-        strncpy(p->ents[p->count].name, buf, NAME_SZ - 1);
-        p->ents[p->count].name[NAME_SZ - 1] = '\0';
+        char buf[PATH_SZ];
+        if (readdir(fd, (uint32_t)idx, buf, sizeof(buf)) <= 0) break;
+        if ((int)strlen(buf) >= NAME_SZ) continue;
+        memcpy(p->ents[p->count].name, buf, strlen(buf) + 1u);
 
         char full[PATH_SZ];
-        path_join(full, p->path, buf, PATH_SZ);
+        if (path_join(full, p->path, buf, PATH_SZ) < 0) {
+            p->ents[p->count].is_dir = 0;
+            p->ents[p->count].size   = -1;
+            p->count++;
+            continue;
+        }
         int sz;
         p->ents[p->count].is_dir = probe_entry(full, &sz);
         p->ents[p->count].size   = sz;
@@ -153,6 +169,11 @@ static void fmt_size(char *buf7, int sz) {
     }
     char d[10]; int len = 0;
     for (int n = sz; n > 0; n /= 10) d[len++] = '0' + n % 10;
+    if (len > 7) {
+        for (int i = 0; i < 6; i++) buf7[i] = ' ';
+        buf7[6] = '#';
+        return;
+    }
     int pad = 7 - len;
     for (int i = 0; i < pad; i++) buf7[i] = ' ';
     for (int i = 0; i < len; i++) buf7[pad + i] = d[len - 1 - i];
@@ -268,31 +289,48 @@ static void draw_info(void) {
     Entry *e = &p->ents[p->cursor];
     char info[78]; int n = 0;
 
+    #define APPEND_CH(ch) do { \
+        if (n >= (int)sizeof(info)) goto out; \
+        info[n++] = (ch); \
+    } while (0)
+    #define APPEND_STR(str_lit) do { \
+        const char *s__ = (str_lit); \
+        while (*s__) { \
+            if (n >= (int)sizeof(info)) goto out; \
+            info[n++] = *s__++; \
+        } \
+    } while (0)
+
     if (strcmp(e->name, "..") == 0) {
         char par[PATH_SZ];
         for (int i = 0; i < PATH_SZ; i++) par[i] = p->path[i];
         path_parent(par);
-        static const char *tag = "[UP] ";
-        for (int i = 0; tag[i] && n < 73; i++) info[n++] = tag[i];
-        for (int i = 0; par[i]  && n < 73; i++) info[n++] = par[i];
+        APPEND_STR("[UP] ");
+        for (int i = 0; par[i]; i++) APPEND_CH(par[i]);
     } else {
         char full[PATH_SZ];
-        path_join(full, p->path, e->name, PATH_SZ);
-        for (int i = 0; full[i] && n < 56; i++) info[n++] = full[i];
+        if (path_join(full, p->path, e->name, PATH_SZ) < 0) {
+            APPEND_STR("[path too long]");
+            goto out;
+        }
+        for (int i = 0; full[i]; i++) APPEND_CH(full[i]);
         if (e->is_dir) {
-            static const char *dt = "  <dir>";
-            for (int i = 0; dt[i] && n < 73; i++) info[n++] = dt[i];
+            APPEND_STR("  <dir>");
         } else if (e->size >= 0) {
-            info[n++] = ' '; info[n++] = ' ';
+            APPEND_CH(' '); APPEND_CH(' ');
             char sz[7]; fmt_size(sz, e->size);
-            for (int i = 0; i < 7; i++) info[n++] = sz[i];
-            info[n++] = ' '; info[n++] = 'B';
+            for (int i = 0; i < 7; i++) APPEND_CH(sz[i]);
+            APPEND_CH(' '); APPEND_CH('B');
         }
     }
 
+out:
     tui_move(INFO_ROW, 1);
     tui_color(TUI_BLACK, TUI_CYAN);
     write(STDOUT_FILENO, info, n);
+
+    #undef APPEND_STR
+    #undef APPEND_CH
 }
 
 static void draw_fkeys(void) {
@@ -314,13 +352,15 @@ static void draw_all(void) {
 
 static int read_key(void) {
     char ch;
-    read(STDIN_FILENO, &ch, 1);
+    if (read(STDIN_FILENO, &ch, 1) != 1) return -1;
     if ((unsigned char)ch != 0x1b) return (unsigned char)ch;
 
     /* Arrow keys arrive as ESC [ A/B/C/D all in one IRQ burst */
-    char ch2; read(STDIN_FILENO, &ch2, 1);
+    char ch2;
+    if (read(STDIN_FILENO, &ch2, 1) != 1) return -1;
     if (ch2 != '[') return (unsigned char)ch2;   /* ESC + other char */
-    char ch3; read(STDIN_FILENO, &ch3, 1);
+    char ch3;
+    if (read(STDIN_FILENO, &ch3, 1) != 1) return -1;
     switch (ch3) {
     case 'A': return KEY_UP;
     case 'B': return KEY_DOWN;
@@ -357,6 +397,7 @@ int main(void) {
 
     for (;;) {
         int k = read_key();
+        if (k < 0) break;
         Panel *p = &panels[active];
 
         switch (k) {
@@ -392,14 +433,19 @@ int main(void) {
             if (e->is_dir) {
                 if (strcmp(e->name, "..") == 0)
                     path_parent(p->path);
-                else
-                    path_join(p->path, p->path, e->name, PATH_SZ);
+                else if (path_join(p->path, p->path, e->name, PATH_SZ) < 0) {
+                    show_error("path too long");
+                    break;
+                }
                 p->cursor = 0; p->top = 0;
                 load_panel(p);
                 draw_pane_frame(active); draw_panel(active); draw_info();
             } else {
                 char full[PATH_SZ];
-                path_join(full, p->path, e->name, PATH_SZ);
+                if (path_join(full, p->path, e->name, PATH_SZ) < 0) {
+                    show_error("path too long");
+                    break;
+                }
                 /* Hand the terminal to the child */
                 tui_cursor_show(); tui_reset(); tui_clear();
                 int pid = exec(full);

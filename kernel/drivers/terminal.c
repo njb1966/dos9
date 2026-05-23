@@ -25,15 +25,55 @@ static int     saved_col;
 /* ── ANSI CSI parser state ───────────────────────────────────────────── */
 typedef enum { TS_NORM, TS_ESC, TS_CSI } ts_t;
 static ts_t ts   = TS_NORM;
-static int  tp[8];   /* parameter values (up to 8) */
+static uint32_t tp[8];   /* parameter values (up to 8) */
 static int  tnp;     /* number of params accumulated */
 static int  tdec;    /* DEC private ('?') prefix     */
+static int  tdrop;   /* ignore extra params beyond tp[7] */
 static int  tbold;   /* bold/bright flag              */
 
 /* ANSI colour index → VGA colour attribute.
    ANSI: 0=Black 1=Red 2=Green 3=Yellow 4=Blue 5=Magenta 6=Cyan 7=White
    VGA:  0=Black 1=Blue 2=Green 3=Cyan  4=Red  5=Magenta 6=Brown 7=LGray */
 static const uint8_t a2v[8] = { 0, 4, 2, 6, 1, 5, 3, 7 };
+
+/* ── COM1 serial mirror (for QEMU -nographic / automated testing) ─────── */
+#define COM1_BASE  0x3F8
+static int com1_ready;
+
+static int com1_probe(void) {
+    uint8_t ier = inb(COM1_BASE + 1);
+    uint8_t lcr = inb(COM1_BASE + 3);
+    uint8_t mcr = inb(COM1_BASE + 4);
+
+    outb(COM1_BASE + 7, 0x55);
+    if (inb(COM1_BASE + 7) != 0x55) {
+        outb(COM1_BASE + 1, ier);
+        outb(COM1_BASE + 3, lcr);
+        outb(COM1_BASE + 4, mcr);
+        return 0;
+    }
+
+    outb(COM1_BASE + 1, ier);
+    outb(COM1_BASE + 3, lcr);
+    outb(COM1_BASE + 4, mcr);
+    return 1;
+}
+
+static void com1_init(void) {
+    if (!com1_probe()) return;
+    outb(COM1_BASE + 1, 0x00);  /* disable interrupts */
+    outb(COM1_BASE + 3, 0x80);  /* DLAB on */
+    outb(COM1_BASE + 0, 0x01);  /* 115200 baud (divisor lo) */
+    outb(COM1_BASE + 1, 0x00);  /* divisor hi */
+    outb(COM1_BASE + 3, 0x03);  /* 8N1, DLAB off */
+    outb(COM1_BASE + 2, 0xC7);  /* FIFO on */
+    com1_ready = 1;
+}
+
+static void com1_putc(char c) {
+    if (!com1_ready) return;
+    outb(COM1_BASE, (uint8_t)c);
+}
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -50,10 +90,12 @@ static inline uint16_t vga_entry(char c, uint8_t fg, uint8_t bg) {
 }
 
 void terminal_init(void) {
+    com1_init();
     term_row = 0; term_col = 0;
     cur_fg = COL_FG_DEF; cur_bg = COL_BG_DEF;
     cur_hidden = 0; saved_row = 0; saved_col = 0;
     tbold = 0; ts = TS_NORM; tnp = 0; tdec = 0;
+    tdrop = 0;
 
     for (size_t y = 0; y < VGA_HEIGHT; y++)
         for (size_t x = 0; x < VGA_WIDTH; x++)
@@ -185,10 +227,15 @@ static void csi_dispatch(char final) {
 /* ── Main putchar ─────────────────────────────────────────────────────── */
 
 void terminal_putchar(char c) {
+    /* Mirror to COM1 for serial capture (QEMU -nographic / automated tests) */
+    if (c == '\n') com1_putc('\r');
+    com1_putc(c);
+
     if (ts == TS_ESC) {
         if (c == '[') {
             ts = TS_CSI;
             tnp = 0; tdec = 0;
+            tdrop = 0;
             for (int i = 0; i < 8; i++) tp[i] = 0;
         } else {
             ts = TS_NORM;
@@ -198,19 +245,33 @@ void terminal_putchar(char c) {
     }
 
     if (ts == TS_CSI) {
+        if (tdrop) {
+            if (c == ';' || c == '?' || (c >= '0' && c <= '9')) return;
+            csi_dispatch(c);
+            ts = TS_NORM;
+            tdrop = 0;
+            return;
+        }
         if (c == '?') { tdec = 1; return; }
         if (c >= '0' && c <= '9') {
             if (tnp == 0) tnp = 1;
-            tp[tnp-1] = tp[tnp-1] * 10 + (c - '0');
+            if (tp[tnp-1] > 214748364u ||
+                (tp[tnp-1] == 214748364u && (uint32_t)(c - '0') > 7u)) {
+                tp[tnp-1] = 2147483647u;
+            } else {
+                tp[tnp-1] = tp[tnp-1] * 10u + (uint32_t)(c - '0');
+            }
             return;
         }
         if (c == ';') {
             if (tnp == 0) tnp = 1;
             if (tnp < 8) tnp++;
+            else tdrop = 1;
             return;
         }
         csi_dispatch(c);
         ts = TS_NORM;
+        tdrop = 0;
         return;
     }
 

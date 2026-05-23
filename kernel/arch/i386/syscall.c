@@ -16,6 +16,37 @@ extern void isr128(void);
 #define PAGE_SIZE    4096u
 #define USER_BRK_MAX 0xBF000000u   /* ceiling: leaves room below the user stack */
 
+static void user_unmap_range(uint32_t pd_phys, uint32_t start, uint32_t end) {
+    if (start >= end) return;
+    uint32_t *pd = (uint32_t *)VIRT(pd_phys);
+
+    for (uint32_t va = start; va < end; va += PAGE_SIZE) {
+        uint32_t pd_idx = va >> 22;
+        uint32_t pt_idx = (va >> 12) & 0x3FFu;
+        if (!(pd[pd_idx] & PF_PRESENT)) continue;
+
+        uint32_t *pt = (uint32_t *)VIRT(pd[pd_idx] & ~0xFFFu);
+        if (!(pt[pt_idx] & PF_PRESENT)) continue;
+        pmm_free_frame((void *)(uintptr_t)(pt[pt_idx] & ~0xFFFu));
+        pt[pt_idx] = 0;
+    }
+
+    for (uint32_t pd_idx = start >> 22; pd_idx <= ((end - 1u) >> 22); pd_idx++) {
+        if (!(pd[pd_idx] & PF_PRESENT)) continue;
+        uint32_t *pt = (uint32_t *)VIRT(pd[pd_idx] & ~0xFFFu);
+        int empty = 1;
+        for (uint32_t i = 0; i < 1024u; i++) {
+            if (pt[i] & PF_PRESENT) {
+                empty = 0;
+                break;
+            }
+        }
+        if (!empty) continue;
+        pmm_free_frame((void *)(uintptr_t)(pd[pd_idx] & ~0xFFFu));
+        pd[pd_idx] = 0;
+    }
+}
+
 /* ── syscall implementations ─────────────────────────────────────────── */
 
 static int32_t sys_exit(int32_t code) {
@@ -81,10 +112,17 @@ static int32_t sys_brk(int32_t increment) {
 
     for (uint32_t va = old_top; va < new_top; va += PAGE_SIZE) {
         uint32_t frame = (uint32_t)pmm_alloc_frame();
-        if (!frame) return -1;
+        if (!frame) {
+            user_unmap_range(p->page_dir, old_top, va);
+            return -1;
+        }
         memset((void *)VIRT(frame), 0, PAGE_SIZE);
-        vmm_map_page_in(p->page_dir, va, frame,
-                        PF_PRESENT | PF_WRITE | PF_USER);
+        if (vmm_map_page_in(p->page_dir, va, frame,
+                            PF_PRESENT | PF_WRITE | PF_USER) < 0) {
+            pmm_free_frame((void *)(uintptr_t)frame);
+            user_unmap_range(p->page_dir, old_top, va);
+            return -1;
+        }
     }
 
     p->brk = new_brk;
@@ -175,6 +213,7 @@ static int32_t sys_waitpid(int32_t pid) {
             }
         }
         if (!found) return 0;   /* already gone — treat as success */
+        process_current()->state = PROC_BLOCKED;
         schedule();
     }
 }

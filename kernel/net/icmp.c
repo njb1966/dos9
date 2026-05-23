@@ -17,7 +17,7 @@ typedef struct {
 } __attribute__((packed)) icmp_echo_t;
 
 void icmp_rx(const void *pkt, uint16_t len, uint32_t src_ip) {
-    if (len < 4) return;
+    if (len < 8) return;
     const icmp_echo_t *p = (const icmp_echo_t *)pkt;
 
     if (p->type == ICMP_ECHO_REQUEST) {
@@ -28,9 +28,11 @@ void icmp_rx(const void *pkt, uint16_t len, uint32_t src_ip) {
         r.checksum = 0;
         r.id       = p->id;
         r.seq      = p->seq;
-        uint16_t copy = (uint16_t)((len - 8 < (uint16_t)sizeof(r.data)) ? len - 8 : (uint16_t)sizeof(r.data));
+        uint16_t copy = (uint16_t)(((uint16_t)(len - 8) < (uint16_t)sizeof(r.data))
+                                   ? (len - 8)
+                                   : (uint16_t)sizeof(r.data));
         memcpy(r.data, p->data, copy);
-        r.checksum = ip_checksum(&r, (uint32_t)(8 + copy));
+        r.checksum = htons(ip_checksum(&r, (uint32_t)(8 + copy)));
         ip_send(src_ip, IP_PROTO_ICMP, &r, (uint16_t)(8 + copy));
 
     } else if (p->type == ICMP_ECHO_REPLY) {
@@ -52,6 +54,6 @@ void icmp_ping(uint32_t dst_ip, uint16_t seq) {
     p.id       = htons(0xD09);
     p.seq      = htons(seq);
     memset(p.data, 0xAB, sizeof(p.data));
-    p.checksum = ip_checksum(&p, sizeof(p));
+    p.checksum = htons(ip_checksum(&p, sizeof(p)));
     ip_send(dst_ip, IP_PROTO_ICMP, &p, sizeof(p));
 }

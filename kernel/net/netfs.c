@@ -27,32 +27,66 @@
 #include <dns.h>
 #include <netif.h>
 #include <net.h>
+#include <process.h>
+#include <kheap.h>
 #include <string.h>
 #include <terminal.h>
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 
-static int parse_uint(const char *s, uint32_t *out) {
-    uint32_t v = 0;
-    if (!*s) return -1;
-    while (*s >= '0' && *s <= '9') { v = v * 10 + (uint32_t)(*s++ - '0'); }
-    *out = v;
-    return (*s == '\0' || *s == '\n' || *s == ' ' || *s == '\r') ? 0 : -1;
+static void copy_entry_name(char *dst, uint32_t nmax, const char *src) {
+    uint32_t i = 0;
+    if (!nmax) return;
+    while (i + 1u < nmax && src[i]) {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = '\0';
 }
 
-static int parse_ip(const char *s, uint32_t *out) {
-    uint32_t a = 0, b = 0, c = 0, d = 0;
-    if (parse_uint(s, &a) < 0 && *s != '.') return -1;
-    while (*s && *s != '.') s++;
-    if (*s++ != '.') return -1;
-    if (parse_uint(s, &b) < 0 && *s != '.') return -1;
-    while (*s && *s != '.') s++;
-    if (*s++ != '.') return -1;
-    if (parse_uint(s, &c) < 0 && *s != '.') return -1;
-    while (*s && *s != '.') s++;
-    if (*s++ != '.') return -1;
-    parse_uint(s, &d);
-    *out = IP4(a, b, c, d);
+static int streq(const char *a, const char *b) {
+    while (*a && *b) {
+        if (*a != *b) return 0;
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static int parse_uint(const char **pp, uint32_t *out) {
+    const char *s = *pp;
+    uint32_t v = 0;
+    if (!*s) return -1;
+    while (*s >= '0' && *s <= '9') {
+        uint32_t digit = (uint32_t)(*s++ - '0');
+        if (v > 429496729u || (v == 429496729u && digit > 5u))
+            return -1;
+        v = v * 10 + digit;
+    }
+    *out = v;
+    *pp = s;
+    return 0;
+}
+
+static int parse_ip(const char **pp, uint32_t *out) {
+    const char *s = *pp;
+    uint32_t oct[4] = {0, 0, 0, 0};
+    for (int i = 0; i < 4; i++) {
+        if (*s < '0' || *s > '9') return -1;
+        while (*s >= '0' && *s <= '9') {
+            uint32_t digit = (uint32_t)(*s++ - '0');
+            if (oct[i] > 25u || (oct[i] == 25u && digit > 5u))
+                return -1;
+            oct[i] = oct[i] * 10u + digit;
+        }
+        if (i < 3) {
+            if (*s++ != '.') return -1;
+        } else if (*s != '\0' && *s != '\n' && *s != ' ' && *s != '\r') {
+            return -1;
+        }
+    }
+    *pp = s;
+    *out = IP4(oct[0], oct[1], oct[2], oct[3]);
     return 0;
 }
 
@@ -113,29 +147,52 @@ static vnode_t  info_vnode = { .type = VTYPE_FILE, .ops = &info_ops };
 
 /* ── /net/tcp/clone ──────────────────────────────────────────────────────── */
 
-static int g_clone_slot = -1;
+static fs_ops_t clone_ops;
 
-static int clone_open(vnode_t *v, int flags) {
+typedef struct {
+    int slot;
+} clone_state_t;
+
+static int clone_close(vnode_t *v) {
+    if (v->priv) kfree(v->priv);
+    kfree(v);
+    return 0;
+}
+
+static int clone_open(vnode_t **vp, int flags) {
     (void)flags;
     int s = tcp_alloc();
     if (s < 0) return -1;
-    g_clone_slot  = s;
-    v->priv       = (void *)(uintptr_t)s;
+
+    vnode_t *v = (vnode_t *)kmalloc(sizeof(vnode_t));
+    clone_state_t *st = (clone_state_t *)kmalloc(sizeof(clone_state_t));
+    if (!v || !st) {
+        if (v) kfree(v);
+        if (st) kfree(st);
+        return -1;
+    }
+
+    memset(v, 0, sizeof(vnode_t));
+    st->slot = s;
+    v->type = VTYPE_FILE;
+    v->ops = &clone_ops;
+    v->priv = st;
+    *vp = v;
     return 0;
 }
 
 static int clone_read(vnode_t *v, void *buf, uint32_t off, uint32_t len) {
     if (off > 0) return 0;
-    int slot = (int)(uintptr_t)v->priv;
+    clone_state_t *st = (clone_state_t *)v->priv;
     char tmp[4];
-    tmp[0] = (char)('0' + (slot % 10));
+    tmp[0] = (char)('0' + (st->slot % 10));
     tmp[1] = '\n';
     uint32_t copy = len < 2u ? len : 2u;
     memcpy(buf, tmp, copy);
     return (int)copy;
 }
 
-static fs_ops_t clone_ops = { .open = clone_open, .read = clone_read };
+static fs_ops_t clone_ops = { .open = clone_open, .close = clone_close, .read = clone_read };
 static vnode_t  clone_vnode = { .type = VTYPE_FILE, .ops = &clone_ops };
 
 /* ── /net/tcp/<n>/ctl ────────────────────────────────────────────────────── */
@@ -145,6 +202,7 @@ static int ctl_write(vnode_t *v, const void *buf, uint32_t off, uint32_t len) {
     int slot = (int)(uintptr_t)v->priv;
     char cmd[64];
     uint32_t copy = len < sizeof(cmd) - 1 ? len : sizeof(cmd) - 1;
+    if (len >= sizeof(cmd)) return -1;
     memcpy(cmd, buf, copy);
     cmd[copy] = '\0';
 
@@ -152,17 +210,19 @@ static int ctl_write(vnode_t *v, const void *buf, uint32_t off, uint32_t len) {
     const char *p = cmd;
     while (*p == ' ') p++;
     if (strncmp(p, "connect", 7) != 0) return -1;
+    if (p[7] != '\0' && p[7] != ' ') return -1;
     p += 7;
     while (*p == ' ') p++;
 
     uint32_t ip = 0;
-    if (parse_ip(p, &ip) < 0) return -1;
-    while (*p && *p != ' ') p++;
-    while (*p == ' ') p++;
+    if (parse_ip(&p, &ip) < 0) return -1;
+    while (*p == ' ' || *p == '\n' || *p == '\r') p++;
 
     uint32_t port = 0;
-    parse_uint(p, &port);
+    if (parse_uint(&p, &port) < 0) return -1;
     if (port == 0 || port > 65535) return -1;
+    while (*p == ' ' || *p == '\n' || *p == '\r') p++;
+    if (*p != '\0') return -1;
 
     int r = tcp_connect(slot, ip, (uint16_t)port);
     return r < 0 ? -1 : (int)len;
@@ -204,9 +264,9 @@ static fs_ops_t status_ops = { .read  = status_read };
 
 static vnode_t *conn_lookup(vnode_t *d, const char *name) {
     int slot = (int)(uintptr_t)d->priv;
-    if (strncmp(name, "ctl",    4) == 0) return &ctl_vnodes[slot];
-    if (strncmp(name, "data",   5) == 0) return &data_vnodes[slot];
-    if (strncmp(name, "status", 7) == 0) return &status_vnodes[slot];
+    if (streq(name, "ctl")) return &ctl_vnodes[slot];
+    if (streq(name, "data")) return &data_vnodes[slot];
+    if (streq(name, "status")) return &status_vnodes[slot];
     return NULL;
 }
 
@@ -214,7 +274,7 @@ static int conn_readdir(vnode_t *d, uint32_t idx, char *name_out, uint32_t nmax)
     (void)d;
     static const char *entries[] = { "ctl", "data", "status" };
     if (idx >= 3) return -1;
-    strncpy(name_out, entries[idx], nmax);
+    copy_entry_name(name_out, nmax, entries[idx]);
     return 0;
 }
 
@@ -224,18 +284,19 @@ static fs_ops_t conn_ops = { .lookup = conn_lookup, .readdir = conn_readdir };
 
 static vnode_t *tcp_dir_lookup(vnode_t *d, const char *name) {
     (void)d;
-    if (strncmp(name, "clone", 6) == 0) return &clone_vnode;
+    if (streq(name, "clone")) return &clone_vnode;
     /* Parse connection number. */
     if (*name < '0' || *name > '9') return NULL;
-    int n = 0;
-    while (*name >= '0' && *name <= '9') { n = n * 10 + (*name++ - '0'); }
-    if (*name != '\0' || n >= TCP_MAX_CONNS) return NULL;
-    return &conn_vnodes[n];
+    uint32_t n = 0;
+    if (parse_uint(&name, &n) < 0) return NULL;
+    if (*name != '\0') return NULL;
+    if (n >= TCP_MAX_CONNS) return NULL;
+    return &conn_vnodes[(int)n];
 }
 
 static int tcp_dir_readdir(vnode_t *d, uint32_t idx, char *name_out, uint32_t nmax) {
     (void)d;
-    if (idx == 0) { strncpy(name_out, "clone", nmax); return 0; }
+    if (idx == 0) { copy_entry_name(name_out, nmax, "clone"); return 0; }
     /* Remaining entries are active connection numbers. */
     idx--;
     (void)idx; return -1;   /* keep it simple: just expose clone */
@@ -249,12 +310,29 @@ static vnode_t  tcp_dir_vnode = { .type = VTYPE_DIR, .ops = &tcp_dir_ops };
 /* Write a hostname → blocking DNS lookup → read back "A.B.C.D\n" or "error\n".
    Separate open-write-close / open-read-close is the intended usage pattern. */
 
-static char g_resolve_buf[24];   /* "255.255.255.255\n\0" fits in 18 bytes */
+static char g_resolve_buf[MAX_PROCS][24];   /* per-process resolve mailbox */
+
+static int resolve_slot(void) {
+    process_t *self = process_current();
+    if (!self) return -1;
+    for (int i = 0; i < MAX_PROCS; i++) {
+        if (process_get(i) == self) return i;
+    }
+    return -1;
+}
 
 static int resolve_write(vnode_t *v, const void *buf, uint32_t off, uint32_t len) {
-    (void)v; (void)off;
+    (void)off;
+    (void)v;
+    int slot = resolve_slot();
+    if (slot < 0) return -1;
+    char *out = g_resolve_buf[slot];
     char hostname[128];
-    uint32_t copy = len < (uint32_t)(sizeof(hostname) - 1u) ? len : (uint32_t)(sizeof(hostname) - 1u);
+    if (len >= (uint32_t)sizeof(hostname)) {
+        memcpy(out, "error\n", 7);
+        return (int)len;
+    }
+    uint32_t copy = len;
     memcpy(hostname, buf, copy);
     hostname[copy] = '\0';
     /* Strip trailing whitespace / newline */
@@ -262,11 +340,15 @@ static int resolve_write(vnode_t *v, const void *buf, uint32_t off, uint32_t len
            (hostname[copy-1u] == '\n' || hostname[copy-1u] == '\r' ||
             hostname[copy-1u] == ' '))
         hostname[--copy] = '\0';
+    if (copy == 0) {
+        memcpy(out, "error\n", 7);
+        return (int)len;
+    }
 
     uint32_t ip = 0;
     if (dns_lookup(hostname, &ip) == 0) {
-        /* Format "A.B.C.D\n" into g_resolve_buf */
-        char *p = g_resolve_buf;
+        /* Format "A.B.C.D\n" into the per-process buffer. */
+        char *p = out;
         uint8_t oct[4] = {
             (uint8_t)(ip >> 24), (uint8_t)(ip >> 16),
             (uint8_t)(ip >>  8), (uint8_t)ip
@@ -281,18 +363,20 @@ static int resolve_write(vnode_t *v, const void *buf, uint32_t off, uint32_t len
         }
         *p++ = '\n'; *p = '\0';
     } else {
-        memcpy(g_resolve_buf, "error\n", 7);
+        memcpy(out, "error\n", 7);
     }
     return (int)len;
 }
 
 static int resolve_read(vnode_t *v, void *buf, uint32_t off, uint32_t len) {
     (void)v;
-    uint32_t total = (uint32_t)strlen(g_resolve_buf);
+    int slot = resolve_slot();
+    if (slot < 0) return -1;
+    uint32_t total = (uint32_t)strlen(g_resolve_buf[slot]);
     if (off >= total) return 0;
     uint32_t copy = total - off;
     if (copy > len) copy = len;
-    memcpy(buf, g_resolve_buf + off, copy);
+    memcpy(buf, g_resolve_buf[slot] + off, copy);
     return (int)copy;
 }
 
@@ -303,18 +387,18 @@ static vnode_t  resolve_vnode = { .type = VTYPE_FILE, .ops = &resolve_ops };
 
 static vnode_t *net_root_lookup(vnode_t *d, const char *name) {
     (void)d;
-    if (strncmp(name, "info",    5) == 0) return &info_vnode;
-    if (strncmp(name, "resolve", 8) == 0) return &resolve_vnode;
-    if (strncmp(name, "tcp",     4) == 0) return &tcp_dir_vnode;
+    if (streq(name, "info")) return &info_vnode;
+    if (streq(name, "resolve")) return &resolve_vnode;
+    if (streq(name, "tcp")) return &tcp_dir_vnode;
     return NULL;
 }
 
 static int net_root_readdir(vnode_t *d, uint32_t idx,
                              char *name_out, uint32_t nmax) {
     (void)d;
-    if (idx == 0) { strncpy(name_out, "info",    nmax); return 0; }
-    if (idx == 1) { strncpy(name_out, "resolve", nmax); return 0; }
-    if (idx == 2) { strncpy(name_out, "tcp",     nmax); return 0; }
+    if (idx == 0) { copy_entry_name(name_out, nmax, "info");    return 0; }
+    if (idx == 1) { copy_entry_name(name_out, nmax, "resolve"); return 0; }
+    if (idx == 2) { copy_entry_name(name_out, nmax, "tcp");     return 0; }
     return -1;
 }
 

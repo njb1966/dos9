@@ -46,13 +46,14 @@ void kheap_init(void) {
 
 void *kmalloc(uint32_t size) {
     if (!size) return NULL;
+    if (size > UINT32_MAX - (ALIGN - 1u)) return NULL;
     size = (size + ALIGN - 1) & ~(ALIGN - 1);
 
     for (block_t *b = heap_list; b; b = b->next) {
         if (!b->free || b->size < size) continue;
 
         /* Split: carve a new free block from the tail if there's room. */
-        if (b->size >= size + HDR + ALIGN) {
+        if (b->size - size >= HDR + ALIGN) {
             block_t *tail  = (block_t *)((uint8_t *)b + HDR + size);
             tail->next     = b->next;
             tail->size     = b->size - size - HDR;

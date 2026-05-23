@@ -3,6 +3,7 @@
 #include <netif.h>
 #include <net.h>
 #include <process.h>
+#include <terminal.h>
 #include <string.h>
 #include <stddef.h>
 
@@ -40,18 +41,18 @@ typedef struct {
 /* ── Connection table ────────────────────────────────────────────────────── */
 
 typedef struct {
-    int      state;
-    int      used;
-    uint32_t remote_ip;
-    uint16_t remote_port;
-    uint16_t local_port;
-    uint32_t snd_nxt;     /* next seq to send */
-    uint32_t snd_una;     /* oldest unacked seq */
-    uint32_t rcv_nxt;     /* next expected remote seq */
-    uint8_t  rxbuf[TCP_RX_BUF_SZ];
-    uint16_t rxhead;      /* write index (filled by tcp_rx) */
-    uint16_t rxtail;      /* read  index (drained by tcp_recv) */
-    int      rx_eof;      /* remote sent FIN */
+    volatile int      state;
+    int               used;
+    uint32_t          remote_ip;
+    uint16_t          remote_port;
+    uint16_t          local_port;
+    uint32_t          snd_nxt;     /* next seq to send */
+    uint32_t          snd_una;     /* oldest unacked seq */
+    uint32_t          rcv_nxt;     /* next expected remote seq */
+    uint8_t           rxbuf[TCP_RX_BUF_SZ];
+    volatile uint16_t rxhead;      /* write index (filled by tcp_rx) */
+    uint16_t          rxtail;      /* read  index (drained by tcp_recv) */
+    volatile int      rx_eof;      /* remote sent FIN */
 } tcp_conn_t;
 
 static tcp_conn_t g_conns[TCP_MAX_CONNS];
@@ -62,25 +63,45 @@ static uint32_t   g_isn       = 0xA1B2C3D4u;
 
 static uint16_t tcp_checksum(uint32_t src_ip, uint32_t dst_ip,
                               const void *tcp_seg, uint16_t tcp_len) {
-    tcp_pseudo_t ph;
-    ph.src      = htonl(src_ip);
-    ph.dst      = htonl(dst_ip);
-    ph.zero     = 0;
-    ph.proto    = IP_PROTO_TCP;
-    ph.tcp_len  = htons(tcp_len);
+    /* Compute over the pseudo-header + TCP segment using network-byte-order
+       16-bit words explicitly so the result is independent of host endianness. */
+    uint8_t ph[12];
+    ph[0]  = (uint8_t)((src_ip >> 24) & 0xFF);
+    ph[1]  = (uint8_t)((src_ip >> 16) & 0xFF);
+    ph[2]  = (uint8_t)((src_ip >>  8) & 0xFF);
+    ph[3]  = (uint8_t)( src_ip        & 0xFF);
+    ph[4]  = (uint8_t)((dst_ip >> 24) & 0xFF);
+    ph[5]  = (uint8_t)((dst_ip >> 16) & 0xFF);
+    ph[6]  = (uint8_t)((dst_ip >>  8) & 0xFF);
+    ph[7]  = (uint8_t)( dst_ip        & 0xFF);
+    ph[8]  = 0;
+    ph[9]  = IP_PROTO_TCP;
+    ph[10] = (uint8_t)((tcp_len >> 8) & 0xFF);
+    ph[11] = (uint8_t)( tcp_len       & 0xFF);
 
-    /* Compute over pseudo-header + TCP segment. */
     uint32_t sum = 0;
-    const uint16_t *p = (const uint16_t *)&ph;
-    for (uint32_t i = 0; i < sizeof(ph) / 2; i++) sum += p[i];
+    for (uint32_t i = 0; i < sizeof(ph); i += 2)
+        sum += (uint16_t)((uint16_t)ph[i] << 8 | ph[i + 1]);
 
-    p = (const uint16_t *)tcp_seg;
+    const uint8_t *b = (const uint8_t *)tcp_seg;
     uint32_t len = tcp_len;
-    while (len > 1) { sum += *p++; len -= 2; }
-    if (len) sum += *(const uint8_t *)p;
+    while (len > 1) {
+        sum += (uint16_t)((uint16_t)b[0] << 8 | b[1]);
+        b += 2;
+        len -= 2;
+    }
+    if (len)
+        sum += (uint16_t)((uint16_t)b[0] << 8);
 
     while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
     return (uint16_t)~sum;
+}
+
+static void log_ip4(uint32_t ip) {
+    terminal_writedec((ip >> 24) & 0xFF); terminal_write(".");
+    terminal_writedec((ip >> 16) & 0xFF); terminal_write(".");
+    terminal_writedec((ip >>  8) & 0xFF); terminal_write(".");
+    terminal_writedec(ip & 0xFF);
 }
 
 /* ── Send a TCP segment ──────────────────────────────────────────────────── */
@@ -104,7 +125,25 @@ static void tcp_send_seg(tcp_conn_t *c, uint8_t flags,
     if (data && dlen) memcpy(buf + TCP_HDR_LEN, data, dlen);
 
     uint16_t seg_len = (uint16_t)(TCP_HDR_LEN + dlen);
-    th->checksum = tcp_checksum(g_netif.ip, c->remote_ip, buf, seg_len);
+    th->checksum = htons(tcp_checksum(g_netif.ip, c->remote_ip, buf, seg_len));
+
+    if (flags & TF_SYN) {
+        terminal_write("[TCPTX] ");
+        log_ip4(g_netif.ip);
+        terminal_write(":");
+        terminal_writedec(c->local_port);
+        terminal_write(" -> ");
+        log_ip4(c->remote_ip);
+        terminal_write(":");
+        terminal_writedec(c->remote_port);
+        terminal_write(" seq=");
+        terminal_writehex(c->snd_nxt);
+        terminal_write(" ack=");
+        terminal_writehex(c->rcv_nxt);
+        terminal_write(" csum=");
+        terminal_writehex(ntohs(th->checksum));
+        terminal_write("\n");
+    }
 
     ip_send(c->remote_ip, IP_PROTO_TCP, buf, seg_len);
 
@@ -121,6 +160,31 @@ static uint16_t rxbuf_free(const tcp_conn_t *c) {
 }
 static uint16_t rxbuf_used(const tcp_conn_t *c) {
     return (uint16_t)((c->rxhead - c->rxtail + TCP_RX_BUF_SZ) % TCP_RX_BUF_SZ);
+}
+
+static uint16_t alloc_local_port(void) {
+    uint16_t start = g_next_port;
+    if (start < 49152u || start == 0) start = 49152u;
+    uint16_t tried = 0;
+    for (;;) {
+        uint16_t port = start;
+        int in_use = 0;
+        for (int i = 0; i < TCP_MAX_CONNS; i++) {
+            if (g_conns[i].used && g_conns[i].local_port == port) {
+                in_use = 1;
+                break;
+            }
+        }
+        if (!in_use) {
+            g_next_port = (port == 65535u) ? 49152u : (uint16_t)(port + 1u);
+            return port;
+        }
+        tried++;
+        if (tried == (uint16_t)(65535u - 49152u + 1u)) return 0;
+        if (start == 65535u) start = 49152u;
+        else start++;
+        if (start < 49152u) start = 49152u;
+    }
 }
 
 /* ── Public API ──────────────────────────────────────────────────────────── */
@@ -151,7 +215,11 @@ int tcp_connect(int slot, uint32_t dst_ip, uint16_t dst_port) {
 
     c->remote_ip   = dst_ip;
     c->remote_port = dst_port;
-    c->local_port  = g_next_port++;
+    c->local_port  = alloc_local_port();
+    if (c->local_port == 0) {
+        tcp_free(slot);
+        return -1;
+    }
     c->snd_nxt     = g_isn;
     g_isn         += 64000;        /* advance ISN between connections */
     c->snd_una     = c->snd_nxt;
@@ -161,14 +229,24 @@ int tcp_connect(int slot, uint32_t dst_ip, uint16_t dst_port) {
     c->rx_eof      = 0;
     c->state       = TCP_SYN_SENT;
 
-    tcp_send_seg(c, TF_SYN, NULL, 0);
+    /* Retry SYN every 50 ticks (~500 ms) in case ARP was not cached on
+       the first send and ip_send silently dropped the packet.
+       Restore snd_nxt before each retry so all SYNs carry the same ISN;
+       SLIRP aborts the connection if it sees different SEQ numbers on the
+       same 4-tuple. */
+    uint32_t isn = c->snd_nxt;
+    for (int retry = 0; retry < 10 && c->state == TCP_SYN_SENT; retry++) {
+        c->snd_nxt = isn;
+        tcp_send_seg(c, TF_SYN, NULL, 0);
+        for (int i = 0; i < 50 && c->state == TCP_SYN_SENT; i++)
+            schedule();
+    }
 
-    /* Wait for SYN-ACK (block via schedule). */
-    int timeout = 500;   /* ~5 s at 100 Hz */
-    while (c->state == TCP_SYN_SENT && timeout-- > 0)
-        schedule();
-
-    return (c->state == TCP_ESTABLISHED) ? 0 : -1;
+    if (c->state != TCP_ESTABLISHED) {
+        tcp_free(slot);
+        return -1;
+    }
+    return 0;
 }
 
 int tcp_send(int slot, const void *buf, uint16_t len) {
@@ -249,6 +327,24 @@ void tcp_rx(const void *pkt, uint16_t len, uint32_t src_ip, uint32_t dst_ip) {
     const uint8_t *data  = (const uint8_t *)pkt + hdr_len;
     uint16_t       dlen  = (uint16_t)(len - hdr_len);
 
+    terminal_write("[TCPRX] ");
+    log_ip4(src_ip);
+    terminal_write(":");
+    terminal_writedec(sport);
+    terminal_write(" -> ");
+    log_ip4(dst_ip);
+    terminal_write(":");
+    terminal_writedec(dport);
+    terminal_write(" flags=");
+    terminal_writehex(th->flags);
+    terminal_write(" seq=");
+    terminal_writehex(seq);
+    terminal_write(" ack=");
+    terminal_writehex(ack);
+    terminal_write(" len=");
+    terminal_writedec(dlen);
+    terminal_write("\n");
+
     /* Find matching connection. */
     tcp_conn_t *c = NULL;
     for (int i = 0; i < TCP_MAX_CONNS; i++) {
@@ -270,6 +366,7 @@ void tcp_rx(const void *pkt, uint16_t len, uint32_t src_ip, uint32_t dst_ip) {
     switch (c->state) {
     case TCP_SYN_SENT:
         if ((th->flags & (TF_SYN | TF_ACK)) == (TF_SYN | TF_ACK)) {
+            if (ack != c->snd_una + 1u) break;
             c->rcv_nxt = seq + 1;
             c->snd_una = ack;
             c->state   = TCP_ESTABLISHED;
@@ -280,7 +377,7 @@ void tcp_rx(const void *pkt, uint16_t len, uint32_t src_ip, uint32_t dst_ip) {
     case TCP_ESTABLISHED:
     case TCP_FIN_WAIT:
         /* Update snd_una with received ACK. */
-        if (th->flags & TF_ACK)
+        if ((th->flags & TF_ACK) && ack >= c->snd_una && ack <= c->snd_nxt)
             c->snd_una = ack;
 
         /* Queue incoming data. */
@@ -308,7 +405,7 @@ void tcp_rx(const void *pkt, uint16_t len, uint32_t src_ip, uint32_t dst_ip) {
         break;
 
     case TCP_CLOSE_WAIT:
-        if (th->flags & TF_ACK)
+        if ((th->flags & TF_ACK) && ack >= c->snd_una && ack <= c->snd_nxt)
             c->snd_una = ack;
         break;
 

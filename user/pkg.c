@@ -18,6 +18,7 @@
 #include <dos9.h>
 
 #define D9PK_HDR_SIZE 64
+#define PKG_NEW_FILE_LIMIT (64u * 512u)   /* DOS9FS prealloc for new files */
 
 typedef struct {
     char     magic[4];
@@ -60,6 +61,7 @@ static int read_pkg(const char *path, d9pk_hdr_t *hdr,
         return -1;
     }
     memcpy(hdr, hdrbuf, sizeof(*hdr));
+    hdr->name[sizeof(hdr->name) - 1] = '\0';
 
     if (hdr->magic[0] != 'D' || hdr->magic[1] != '9' ||
         hdr->magic[2] != 'P' || hdr->magic[3] != 'K') {
@@ -135,17 +137,42 @@ static int cmd_install(const char *path) {
         return 1;
     }
 
-    /* Build /disk/<name>. */
+    /* Build /disk/<name>.  Keep the on-disk name a plain filename. */
+    uint32_t name_len = 0;
+    while (name_len < sizeof(hdr.name) && hdr.name[name_len]) {
+        if (hdr.name[name_len] == '/') {
+            puts("pkg: invalid package name");
+            free(elf_data);
+            return 1;
+        }
+        name_len++;
+    }
+    /* DOS9FS directory entries store 15 visible characters plus NUL. */
+    if (name_len == 0 || name_len > 15u) {
+        puts("pkg: invalid package name");
+        free(elf_data);
+        return 1;
+    }
+
     char dest[24];
     dest[0] = '/'; dest[1] = 'd'; dest[2] = 'i';
     dest[3] = 's'; dest[4] = 'k'; dest[5] = '/';
-    uint32_t i = 0;
-    while (i < 15u && hdr.name[i]) { dest[6 + i] = hdr.name[i]; i++; }
-    dest[6 + i] = '\0';
+    for (uint32_t i = 0; i < name_len; i++) dest[6 + i] = hdr.name[i];
+    dest[6 + name_len] = '\0';
 
-    /* Open existing file for overwrite, or create new. */
+    /* Open existing file for overwrite, or create new.
+       New DOS9FS files have a fixed preallocation budget, so reject
+       packages that obviously cannot fit before creating a partial file. */
     int out = open(dest, O_RDWR);
-    if (out < 0) out = open(dest, O_CREAT | O_WRONLY);
+    if (out < 0 && elf_size > PKG_NEW_FILE_LIMIT) {
+        printf("pkg: '%s' too large for a new DOS9FS file (%u bytes max)\n",
+               dest, PKG_NEW_FILE_LIMIT);
+        free(elf_data);
+        return 1;
+    }
+    if (out < 0) {
+        out = open(dest, O_CREAT | O_WRONLY);
+    }
     if (out < 0) {
         printf("pkg: cannot create '%s'\n", dest);
         free(elf_data);

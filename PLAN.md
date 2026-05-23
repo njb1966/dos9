@@ -4,12 +4,66 @@
 > **Tagline:** Simple. Visible. Yours.
 > **Sub tagline:** A Native Text Operating System
 > **Status:** Phase 3 complete (2026-05-21) — full userland: shell+scripting, TUI toolkit, file manager, text editor, disk write, argv, package system. Next: Phase 4 (small web / networking).
-> **Repository:** https://github.com/njb1966/dos9 (GitHub only — see CLAUDE.md for push workflow)
+> **Repository:** local-only workspace in `tech/DOS9_codex` (see `CLAUDE.md`)
 
 DOS/9
 Simple. Visible. Yours.
 small subtext: A Native Text Operating System
 ---
+
+## Development targets
+
+- **QEMU** is the fast inner-loop test harness.
+- **VMs** are the compatibility and integration target.
+- **Pentium-class physical hardware** is a first-class deployment target.
+- New code should avoid emulator-only assumptions unless they are explicitly gated or documented.
+
+### Compatibility policy
+
+Treat the following as the default implementation contract:
+
+- Define the support floor as 32-bit Pentium-class x86 with conservative BIOS-era behavior.
+- Code to that floor directly instead of assuming QEMU conveniences are universal.
+- Guard optional features with detection and safe fallbacks.
+- Test in conservative VMs before treating a feature as stable.
+- Keep the hardware-readiness checklist current when adding timing, storage, or network work.
+
+### Hardware readiness checklist
+
+Use this as a gate before treating a feature as deployment-ready on real machines:
+
+- [ ] RTC/time works on real hardware without depending on the fallback Unix timestamp.
+- [ ] Networking works without SLIRP-only defaults or QEMU-specific assumptions.
+- [ ] Serial mirroring is optional and failure-safe when COM1 is absent or unwired.
+- [ ] Any new fixed-size limit has an explicit reason and a known growth path.
+- [ ] Boot, shell, disk, and Gemini all still work under a conservative VM setup.
+- [ ] At least one real Pentium-class machine has been used for validation after a major networking, storage, or timing change.
+
+### Compatibility matrix
+
+Use this as the default regression ladder:
+
+| Profile | Purpose | Network path | Expected result |
+|---|---|---|---|
+| `dev-qemu` | Fast iteration | QEMU user-net | Boot, shell, and quick feature work |
+| `vm-baseline` | Conservative VM boot check | No external network required | Boot to shell, `/dev/time`, `/disk`, and basic device probing |
+| `vm-guestfwd` | Local TCP smoke test | QEMU `guestfwd` to a host-local service | TCP connect, ARP, and data exchange without external DNS/TLS |
+| `vm-network` | Full network check | QEMU user-net with DNS/TLS | DNS, TCP, TLS, and Gemini against real endpoints |
+| `pentium-floor` | Deployment target | Real Pentium-era hardware | Same as conservative VM, without emulator-only behavior |
+
+Rules:
+- `vm-baseline` is the minimum bar before calling behavior stable.
+- `vm-guestfwd` is the preferred smoke test for local TCP changes. Use `scripts/guestfwd-server.sh` on the host with `make smoke-net` in the guest environment.
+- `vm-network` is for DNS, TLS, and Gemini validation.
+- Any major timing, storage, or device-probing change should still be checked against `pentium-floor` when hardware is available.
+
+### Known non-blocking limitations
+
+- Shell parsing is intentionally small and now supports basic quoting/escaping, but it is still not a full POSIX shell.
+- This is acceptable for the current workflow and test matrix.
+- Revisit it only when user-facing command lines need additional shell semantics such as richer metacharacter handling.
+- `make smoke-shell` is the repeatable shell regression check; it feeds `tests/shellreg.txt` into the guest shell and verifies the expected output in the boot log.
+- The shell smoke set now includes package metadata and reinstall coverage via `/disk/pkg info /disk/hello.d9p` and `/disk/pkg install /disk/hello.d9p`, plus the `time`, formatter, allocator, argv, pipeline, and basic `if`/`for` probes already shipped in the image.
 
 ## 1. The Premise
 
@@ -62,7 +116,7 @@ A 9P-style resource protocol, where a remote directory — including, eventually
 - **A filesystem that evolves FAT's simplicity rather than abandoning it for NTFS complexity.**
 - **Small web citizenship.** Native Gemini, Gopher, and RSS clients as first-class system tools.
 - **DOS-era games as native citizens** via integrated DOSBox-style emulation, treated with respect, not nostalgia kitsch.
-- **Bootable on a Pentium.** If it doesn't run on hardware the small-web community already loves, we've failed.
+- **Bootable on a Pentium.** If it doesn't run on hardware the small-web community already loves, we've failed. QEMU is for iteration; Pentiums and VMs are the real compatibility target.
 
 ### What DOS/9 rejects
 
@@ -101,7 +155,7 @@ Chosen deliberately:
 - **Thematically correct.** A flat-memory 32-bit OS is what DOS *should have become* in the 386 era.
 - **Simpler.** No long mode, no PAE complications, no four-level paging.
 - **More reference material.** Every tutorial OS, every OSDev page, xv6 itself — all target 32-bit first.
-- **Hardware-friendly.** Runs on a Pentium. Runs on a Thinkpad from 2003. Runs anywhere the small web community already runs.
+- **Hardware-friendly.** Runs on a Pentium. Runs on a Thinkpad from 2003. Runs in QEMU and common VMs, but does not depend on emulator-only behavior.
 - **64-bit can come later** if the project lives long enough to want it.
 
 ### Language: C
@@ -123,7 +177,7 @@ Chosen deliberately:
 - [ ] Skim the xv6 source alongside the relevant book chapters.
 - [ ] Skim OSDev Wiki's "Getting Started" and "Beginner Mistakes" pages.
 - [x] Choose a project name. Update this document. (**DOS/9**)
-- [x] Set up the development environment: cross-compiler (i686-elf-gcc 14.3.0 + binutils 2.46 at `~/tools/cross`), QEMU, GDB, Makefile build system. Kernel boots to `kernel_main()` in QEMU.
+- [x] Set up the development environment: cross-compiler (i686-elf-gcc 14.3.0 + binutils 2.46 at `~/tools/cross`), QEMU, GDB, Makefile build system. QEMU is the fast test loop; real hardware compatibility remains a standing target.
 - [x] Decide on the RAG / reference-lookup approach (see §6). (**Option B: grep + AI companion**)
 - [x] Assemble reference corpus in `docs/references/` (see §6).
 - [x] Create `CLAUDE.md` with project context and reference URLs for Claude Code sessions.
@@ -132,7 +186,7 @@ Chosen deliberately:
 
 ### Phase 1 — To a prompt
 
-**Goal:** Boot on QEMU, get to a working keyboard prompt. The screen shows your OS's name, a cursor blinks, you type, characters appear. Nothing more.
+**Goal:** Boot on QEMU, get to a working keyboard prompt, while staying compatible with Pentium-era hardware constraints. The screen shows your OS's name, a cursor blinks, you type, characters appear. Nothing more.
 
 This is the emotional hardest phase. It looks like nothing. It is the foundation of everything.
 
@@ -225,14 +279,20 @@ This is the emotional hardest phase. It looks like nothing. It is the foundation
 - [x] Plan 9 `/net` VFS: `/net/info`, `/net/tcp/clone`, `/net/tcp/<n>/{ctl,data,status}`.
 - [x] Native Gopher client (`user/gopher.c`) — TCP via /net/tcp.
 
-#### Phase 4b — name resolution + TLS (in progress)
+#### Phase 4b — name resolution + TLS (complete 2026-05-22)
 - [x] DNS resolver (`kernel/net/dns.c`) — synchronous UDP A-record lookup; `/net/resolve` VFS file exposes it to user space; `gopher` now accepts hostnames. (2026-05-21)
-- [ ] TLS — port BearSSL (~50 KB, designed for constrained environments) as the TLS layer.
-- [ ] Native Gemini browser (TUI) — requires TLS above.
+- [x] TLS — port BearSSL (~50 KB, designed for constrained environments) as the TLS layer.
+- [x] Native Gemini browser (TUI) — requires TLS above.
+
+Notes:
+- `user/gemini.c` now reads Unix time from `/dev/time`, which is backed by the kernel RTC driver. This feeds BearSSL's X.509 engine with a real validation timestamp instead of the earlier fixed stopgap.
+- `user/rss.c` now provides a native plain-HTTP RSS/Atom reader, and `make smoke-rss` exercises it over guestfwd with a canned host-local feed.
 
 #### Phase 4c — readers
-- [ ] Native RSS reader.
-- [ ] Possibly: Finger, NNTP, IRC clients.
+- [x] Native RSS reader.
+- [x] Native Finger client.
+- [x] Native IRC client.
+- [x] Native NNTP client.
 - [ ] **Aspirational:** lay groundwork for the 9P-style remote-as-local mount idea (§1.1). Even a read-only "mount a Gemini capsule as a directory" prototype would be the moment DOS/9's thesis becomes undeniable. Not promised. Designed-for, not built-yet.
 
 ### Phase 5 — Games as first-class citizens
@@ -252,7 +312,7 @@ This project will be built with Claude Code as the developer's companion. Some h
 - **Cross-reference everything.** Kernel code has exact requirements that are easy to get subtly wrong — alignment, bit patterns in descriptors, ordering when setting up paging. When the AI confidently says "set this bit in CR0," verify against OSDev Wiki and the Intel SDM. The training data on this domain is good but not perfect, and one wrong bit in a GDT entry is a triple fault that wastes hours.
 - **The Intel SDM is the ground truth.** Not the AI, not OSDev Wiki, not even xv6. When in doubt, the manual wins.
 - **Commit constantly.** Every time something works, commit. "The last version that booted" is precious. You will break things in ways that are hard to reason about, and bisection saves projects.
-- **Use QEMU + GDB, not real hardware.** Until late in the project. Real-hardware bugs add a layer of difficulty you don't need yet.
+- **Use QEMU + GDB for the inner loop, but verify on real hardware or conservative assumptions early enough that we do not paint ourselves into an emulator-only corner.** Real-hardware bugs add a layer of difficulty, but the target remains Pentium-class machines.
 - **Don't let the AI over-architect early.** Phase 1 should be small, ugly, and working. Refactor later. Premature elegance kills hobby OS projects.
 
 ---
@@ -280,7 +340,7 @@ All located under `docs/references/`. See `docs/references/README.md` for per-it
 - [x] **9front** — shallow clone of the active Plan 9 fork. `plan9/9front/`. Key: `sys/src/9/` (kernel), `sys/src/lib9p/` (9P implementation), `rc/` (shell).
 - [x] **Operating Systems: Three Easy Pieces** — all chapter PDFs. `ostep/`
 - [x] **Little OS Book** — `little-os-book/little-os-book.pdf`. Concise 32-bit walkthrough, matches DOS/9's target exactly.
-- [x] **Philipp Oppermann's blog** — full source cloned from GitHub as markdown. `phil-opp/blog/content/edition-2/posts/`. Cleaner than a scrape.
+- [x] **Philipp Oppermann's blog** — full source cloned locally as markdown. `phil-opp/blog/content/edition-2/posts/`. Cleaner than a scrape.
 - [x] **Linux kernel subsystems** — sparse clone: `fs/proc`, `fs/sysfs`, `drivers/tty`, `drivers/input`. `linux-subsystems/`
 - [x] **SerenityOS** — shallow clone (190MB). `serenity/`. Key: `Kernel/Memory`, `Kernel/FileSystem`, `Kernel/Tasks`, `Kernel/Interrupts`.
 - [x] **FreeDOS** — kernel (`freedos/kernel/`) and command shell (`freedos/freecom/`). Reference for shell design and FAT-era filesystem conventions.

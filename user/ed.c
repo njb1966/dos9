@@ -44,28 +44,40 @@ static char savebuf[MAX_LINES * (LINE_CAP + 1)];
 
 /* Simple integer → string, writes into dst, returns number of chars written. */
 static int itoa_dec(int n, char *dst) {
-    if (n < 0) { dst[0] = '-'; return 1 + itoa_dec(-n, dst + 1); }
+    unsigned int u;
+    int pos = 0;
+    if (n < 0) {
+        dst[0] = '-';
+        u = (unsigned int)(-(n + 1)) + 1u;
+        pos = 1;
+    } else {
+        u = (unsigned int)n;
+    }
+
     char tmp[12];
     int len = 0;
-    if (n == 0) { dst[0] = '0'; return 1; }
-    while (n > 0) { tmp[len++] = (char)('0' + n % 10); n /= 10; }
-    for (int i = 0; i < len; i++) dst[i] = tmp[len - 1 - i];
-    return len;
+    if (u == 0) {
+        dst[pos] = '0';
+        return pos + 1;
+    }
+    while (u > 0) { tmp[len++] = (char)('0' + (u % 10u)); u /= 10u; }
+    for (int i = 0; i < len; i++) dst[pos + i] = tmp[len - 1 - i];
+    return pos + len;
 }
 
 /* ── Input ────────────────────────────────────────────────────────────── */
 
 static int read_key(void) {
     char ch;
-    if (read(STDIN_FILENO, &ch, 1) != 1) return 0;
+    if (read(STDIN_FILENO, &ch, 1) != 1) return -1;
     if ((unsigned char)ch != 0x1b) return (unsigned char)ch;
 
     /* Try to read escape sequence. */
     char ch2;
-    if (read(STDIN_FILENO, &ch2, 1) != 1) return 0x1b;
+    if (read(STDIN_FILENO, &ch2, 1) != 1) return -1;
     if (ch2 != '[') return (unsigned char)ch2;
     char ch3;
-    if (read(STDIN_FILENO, &ch3, 1) != 1) return 0;
+    if (read(STDIN_FILENO, &ch3, 1) != 1) return -1;
     switch (ch3) {
     case 'A': return KEY_UP;
     case 'B': return KEY_DOWN;
@@ -77,14 +89,14 @@ static int read_key(void) {
 
 /* ── File I/O ─────────────────────────────────────────────────────────── */
 
-static void load_file(void) {
+static int load_file(void) {
     int fd = open(filename, O_RDONLY);
     if (fd < 0) {
         /* New file — start with one empty line. */
         nlines = 1;
         buf[0][0] = '\0';
         llen[0] = 0;
-        return;
+        return 0;
     }
 
     /* Read file into savebuf. */
@@ -94,6 +106,15 @@ static void load_file(void) {
     while (total < maxsz &&
            (n = read(fd, savebuf + total, (size_t)(maxsz - total))) > 0) {
         total += n;
+    }
+    if (total == maxsz) {
+        char extra;
+        n = read(fd, &extra, 1);
+        if (n > 0) {
+            close(fd);
+            puts("ed: file too large");
+            return -1;
+        }
     }
     close(fd);
     savebuf[total] = '\0';
@@ -119,6 +140,7 @@ static void load_file(void) {
         buf[0][0] = '\0';
         llen[0] = 0;
     }
+    return 0;
 }
 
 static int save_file(void) {
@@ -127,11 +149,11 @@ static int save_file(void) {
     int maxsz = (int)sizeof(savebuf);
     for (int i = 0; i < nlines; i++) {
         if (i > 0) {
-            if (pos >= maxsz - 1) break;
+            if (pos >= maxsz - 1) return -1;
             savebuf[pos++] = '\n';
         }
         int l = llen[i];
-        if (pos + l >= maxsz) l = maxsz - pos - 1;
+        if (pos + l >= maxsz) return -1;
         memcpy(savebuf + pos, buf[i], (size_t)l);
         pos += l;
     }
@@ -327,8 +349,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    strncpy(filename, argv[1], 127);
-    filename[127] = '\0';
+    int flen = (int)strlen(argv[1]);
+    if (flen >= (int)sizeof(filename)) {
+        puts("ed: path too long");
+        return 1;
+    }
+    memcpy(filename, argv[1], (size_t)flen + 1u);
 
     nlines   = 1;
     buf[0][0] = '\0';
@@ -336,7 +362,7 @@ int main(int argc, char **argv) {
     cx = cy = top = modified = 0;
     status_msg[0] = '\0';
 
-    load_file();
+    if (load_file() < 0) return 1;
 
     tui_cursor_hide();
     render_all();
@@ -346,6 +372,7 @@ int main(int argc, char **argv) {
 
     for (;;) {
         int k = read_key();
+        if (k < 0) break;
 
         /* Handle quit_confirm: any key other than Ctrl+Q clears it. */
         if (k != 17 && quit_confirm) {

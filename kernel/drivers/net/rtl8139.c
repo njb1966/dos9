@@ -86,17 +86,24 @@ static void rtl_send(const void *frame, uint16_t len) {
     uint32_t timeout = 100000;
     while (!(r32((uint16_t)(REG_TSD0 + g_tx_cur * 4)) & TSD_OWN) && --timeout)
         ;
+    if (!timeout) return;
 
     memcpy(tx_buf[g_tx_cur], frame, len);
 
     /* Minimum Ethernet frame is 60 bytes. */
     uint16_t send_len = len < 60 ? 60 : len;
+    if (send_len > len)
+        memset(tx_buf[g_tx_cur] + len, 0, (size_t)(send_len - len));
 
-    /* Writing to TSD clears OWN (bit 13) and starts the transmit. */
-    w32((uint16_t)(REG_TSAD0 + g_tx_cur * 4), PHYS(tx_buf[g_tx_cur]));
-    w32((uint16_t)(REG_TSD0  + g_tx_cur * 4), (uint32_t)send_len);
-
+    /* Writing to TSD clears OWN (bit 13) and starts the transmit.
+       Increment g_tx_cur BEFORE the write so a re-entrant send from
+       an IRQ that fires synchronously during the TSD write uses the
+       next descriptor, not this one. */
+    int slot = g_tx_cur;
     g_tx_cur = (g_tx_cur + 1) & 3;
+
+    w32((uint16_t)(REG_TSAD0 + slot * 4), PHYS(tx_buf[slot]));
+    w32((uint16_t)(REG_TSD0  + slot * 4), (uint32_t)send_len);
 }
 
 /* ── RX IRQ handler ──────────────────────────────────────────────────────── */
@@ -113,10 +120,20 @@ static void rtl_irq_handler(struct registers *r) {
         /* Packet header: [status 16-bit][length 16-bit] */
         uint16_t pkt_status = *(uint16_t *)(rx_buf + g_rx_ptr);
         uint16_t pkt_len    = *(uint16_t *)(rx_buf + g_rx_ptr + 2);
+        uint32_t remain      = (uint32_t)sizeof(rx_buf) - g_rx_ptr;
 
         if (!(pkt_status & 0x0001)) break;  /* ROK not set in header */
 
-        uint16_t data_len = pkt_len - 4;    /* strip 4-byte CRC */
+        if (remain <= 4u) {
+            g_rx_ptr = 0;
+            w16(REG_CAPR, (uint16_t)(g_rx_ptr - 16));
+            continue;
+        }
+        if (pkt_len < 4u) pkt_len = 4u;
+        if ((uint32_t)pkt_len > remain - 4u)
+            pkt_len = (uint16_t)(remain - 4u);
+
+        uint16_t data_len = (uint16_t)(pkt_len - 4u);    /* strip 4-byte CRC */
         uint8_t *data     = rx_buf + g_rx_ptr + 4;
 
         netif_receive(data, data_len);

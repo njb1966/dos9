@@ -7,6 +7,7 @@ typedef struct {
     uint32_t ip;       /* host byte order */
     uint32_t netmask;
     uint32_t gateway;
+    uint32_t dns;      /* host byte order */
     int      up;       /* 1 once DHCP completes */
     void (*send)(const void *frame, uint16_t len);
 } netif_t;

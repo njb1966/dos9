@@ -4,6 +4,7 @@
 #define PATH_MAX     64
 #define DIRENT_MAX   64
 #define HIST_SIZE    32
+#define ARG_MAX     16
 
 /* ── history ─────────────────────────────────────────────────────────────── */
 
@@ -51,21 +52,23 @@ static const char *var_get(const char *name) {
     return NULL;
 }
 
-static void var_set(const char *name, const char *val) {
+static int var_set(const char *name, const char *val) {
+    if (!name || !*name || !val) return -1;
+    if (strlen(name) >= VAR_NAME) return -1;
+    if (strlen(val) >= VAR_VAL) return -1;
     for (int i = 0; i < var_count; i++) {
         if (strcmp(var_names[i], name) == 0) {
-            strncpy(var_vals[i], val, VAR_VAL - 1);
-            var_vals[i][VAR_VAL - 1] = '\0';
-            return;
+            memcpy(var_vals[i], val, strlen(val) + 1);
+            return 0;
         }
     }
     if (var_count < VAR_MAX) {
-        strncpy(var_names[var_count], name, VAR_NAME - 1);
-        var_names[var_count][VAR_NAME - 1] = '\0';
-        strncpy(var_vals[var_count], val, VAR_VAL - 1);
-        var_vals[var_count][VAR_VAL - 1] = '\0';
+        memcpy(var_names[var_count], name, strlen(name) + 1);
+        memcpy(var_vals[var_count], val, strlen(val) + 1);
         var_count++;
+        return 0;
     }
+    return -1;
 }
 
 static void var_unset(const char *name) {
@@ -82,33 +85,41 @@ static void var_unset(const char *name) {
     }
 }
 
-/* expand_vars: copy src to dst, replacing $name with the stored value. */
-static void expand_vars(const char *src, char *dst, int dmax) {
+/* expand_vars: copy src to dst, replacing $name with the stored value.
+   Returns 0 on success, -1 on malformed input (e.g. an overlong name). */
+static int expand_vars(const char *src, char *dst, int dmax) {
     int di = 0;
-    while (*src && di < dmax - 1) {
+    while (*src) {
         if (*src == '$') {
             src++;
             char name[VAR_NAME];
             int ni = 0;
-            while (*src && ni < VAR_NAME - 1 &&
+            while (*src &&
                    ((*src >= 'a' && *src <= 'z') || (*src >= 'A' && *src <= 'Z') ||
                     (*src >= '0' && *src <= '9') || *src == '_')) {
+                if (ni >= VAR_NAME - 1) return -1;
                 name[ni++] = *src++;
             }
             name[ni] = '\0';
             if (ni > 0) {
                 const char *val = var_get(name);
                 if (val) {
-                    while (*val && di < dmax - 1) dst[di++] = *val++;
+                    while (*val) {
+                        if (di >= dmax - 1) return -1;
+                        dst[di++] = *val++;
+                    }
                 }
             } else {
-                if (di < dmax - 1) dst[di++] = '$';
+                if (di >= dmax - 1) return -1;
+                dst[di++] = '$';
             }
         } else {
+            if (di >= dmax - 1) return -1;
             dst[di++] = *src++;
         }
     }
     dst[di] = '\0';
+    return 0;
 }
 
 /* ── tab completion ──────────────────────────────────────────────────────── */
@@ -149,6 +160,7 @@ static void complete(char *buf, int *lenp, int max) {
          readdir(fd, idx, entry, sizeof(entry)) == 0;
          idx++) {
         if (strncmp(entry, prefix, (size_t)plen) == 0) {
+            if ((int)strlen(entry) >= DIRENT_MAX) continue;
             if (nm < 8) strcpy(matches[nm], entry);
             nm++;
         }
@@ -184,13 +196,17 @@ static void complete(char *buf, int *lenp, int max) {
 static int readline(char *buf, int max) {
     int  len      = 0;
     int  hist_pos = hist_count;
+    int  saw_eof  = 0;
     char saved[LINE_MAX];
     saved[0] = '\0';
     buf[0]   = '\0';
 
     for (;;) {
         char c;
-        if (read(STDIN_FILENO, &c, 1) != 1) break;
+        if (read(STDIN_FILENO, &c, 1) != 1) {
+            saw_eof = 1;
+            break;
+        }
 
         if (c == '\r' || c == '\n') {
             write(STDOUT_FILENO, "\n", 1);
@@ -224,7 +240,8 @@ static int readline(char *buf, int max) {
             erase_chars(len);
             len = (int)strlen(h);
             if (len >= max) len = max - 1;
-            strcpy(buf, h);
+            memcpy(buf, h, (size_t)len);
+            buf[len] = '\0';
             write(STDOUT_FILENO, buf, (size_t)len);
             hist_pos = target;
             continue;
@@ -252,32 +269,123 @@ static int readline(char *buf, int max) {
     }
 
     buf[len] = '\0';
+    if (saw_eof && len == 0)
+        return -1;
     return len;
 }
 
-/* ── argument splitting ──────────────────────────────────────────────────── */
+/* ── argument parsing ────────────────────────────────────────────────────── */
 
-static char *split_arg(char *buf) {
-    while (*buf && *buf != ' ') buf++;
-    if (!*buf) return NULL;
-    *buf = '\0';
-    return buf + 1;
+static const char *skip_spaces(const char *p) {
+    while (*p == ' ') p++;
+    return p;
+}
+
+/*
+ * Parse one shell token from `*pp` into `dst`, handling:
+ *   - spaces as separators
+ *   - single/double quotes
+ *   - backslash escapes outside quotes and inside double quotes
+ * Returns 1 if a token was parsed, 0 at end of input, -1 on malformed input.
+ */
+static int parse_word(const char **pp, char *dst, int max) {
+    const char *p = skip_spaces(*pp);
+    int di = 0;
+    if (!*p) {
+        *pp = p;
+        return 0;
+    }
+
+    if (*p == '|') {
+        if (max <= 1) return -1;
+        dst[0] = '|';
+        dst[1] = '\0';
+        *pp = p + 1;
+        return 2;
+    }
+
+    while (*p && *p != ' ' && *p != '|') {
+        char c = *p++;
+        if (c == '\\' && *p) {
+            if (*p == ' ' || *p == '|') {
+                if (di >= max - 1) return -1;
+                dst[di++] = *p++;
+                continue;
+            }
+            c = *p++;
+            if (di >= max - 1) return -1;
+            dst[di++] = c;
+            continue;
+        }
+        if (c == '\\' && !*p) return -1;
+        if (c == '\'' || c == '"') {
+            char quote = c;
+            while (*p && *p != quote) {
+                c = *p++;
+                if (quote == '"' && c == '\\' && *p) c = *p++;
+                if (di >= max - 1) return -1;
+                dst[di++] = c;
+            }
+            if (*p != quote) return -1;
+            p++;
+            continue;
+        }
+        if (di >= max - 1) return -1;
+        dst[di++] = c;
+    }
+
+    dst[di] = '\0';
+    *pp = skip_spaces(p);
+    return 1;
+}
+
+static int split_argv(const char *line, char argv_buf[ARG_MAX][LINE_MAX],
+                      char **argv, int *pipe_at) {
+    int argc = 0;
+    const char *p = line;
+    if (pipe_at) *pipe_at = -1;
+    while (argc < ARG_MAX) {
+        int r = parse_word(&p, argv_buf[argc], LINE_MAX);
+        if (r < 0) return -1;
+        if (r == 0) break;
+        if (r == 2) {
+            if (pipe_at && *pipe_at >= 0) return -1;
+            if (pipe_at) *pipe_at = argc;
+            continue;
+        }
+        argv[argc] = argv_buf[argc];
+        argc++;
+    }
+    if (argc == ARG_MAX) {
+        const char *q = skip_spaces(p);
+        if (*q) return -1;
+    }
+    argv[argc] = NULL;
+    return argc;
 }
 
 /* ── pipeline ────────────────────────────────────────────────────────────── */
 
-static void execute_pipeline(char *left, char *right) {
-    while (*left  == ' ') left++;
-    while (*right == ' ') right++;
-    int ll = (int)strlen(left);
-    int rl = (int)strlen(right);
-    while (ll > 0 && left[ll-1]  == ' ') left[--ll]  = '\0';
-    while (rl > 0 && right[rl-1] == ' ') right[--rl] = '\0';
+static int execute_pipeline(int left_argc, char **left_argv,
+                            int right_argc, char **right_argv) {
+    if (left_argc <= 0 || right_argc <= 0 || !left_argv[0] || !right_argv[0]) {
+        puts("pipe: empty command");
+        return -1;
+    }
+    if (left_argv[0][0] != '/' || right_argv[0][0] != '/') {
+        puts("pipe: external programs only");
+        return -1;
+    }
 
-    if (!left[0] || !right[0]) { puts("pipe: empty command"); return; }
+    const char *left_vec[ARG_MAX + 1];
+    const char *right_vec[ARG_MAX + 1];
+    for (int i = 0; i < left_argc; i++) left_vec[i] = left_argv[i];
+    left_vec[left_argc] = NULL;
+    for (int i = 0; i < right_argc; i++) right_vec[i] = right_argv[i];
+    right_vec[right_argc] = NULL;
 
     int p[2];
-    if (pipe(p) < 0) { puts("pipe: failed"); return; }
+    if (pipe(p) < 0) { puts("pipe: failed"); return -1; }
 
     int saved_out = dup(STDOUT_FILENO);
     int saved_in  = dup(STDIN_FILENO);
@@ -286,25 +394,26 @@ static void execute_pipeline(char *left, char *right) {
         close(p[0]); close(p[1]);
         if (saved_out >= 0) close(saved_out);
         if (saved_in  >= 0) close(saved_in);
-        return;
+        return -1;
     }
 
     /* Left: stdout -> pipe write. */
     dup2(p[1], STDOUT_FILENO);
-    int left_pid = exec(left);
+    int left_pid = execv(left_vec[0], left_vec, left_argc);
     dup2(saved_out, STDOUT_FILENO);
     close(saved_out);
     close(p[1]);
 
     /* Right: stdin <- pipe read. */
     dup2(p[0], STDIN_FILENO);
-    int right_pid = exec(right);
+    int right_pid = execv(right_vec[0], right_vec, right_argc);
     dup2(saved_in, STDIN_FILENO);
     close(saved_in);
     close(p[0]);
 
     if (left_pid  > 0) waitpid(left_pid);
     if (right_pid > 0) waitpid(right_pid);
+    return 0;
 }
 
 /* ── scripting: blocks ───────────────────────────────────────────────────── */
@@ -332,11 +441,13 @@ static void block_free(block_t *b) {
 static int block_collect(block_t *b) {
     b->count = 0;
     int depth = 0;
+    int overflow = 0;
 
     for (;;) {
         write(STDOUT_FILENO, "..> ", 4);
         char tmp[LINE_MAX];
-        readline(tmp, sizeof(tmp));
+        if (readline(tmp, sizeof(tmp)) < 0)
+            return -1;
 
         /* Determine if this line opens or closes a nesting level. */
         char first[LINE_MAX];
@@ -349,15 +460,23 @@ static int block_collect(block_t *b) {
         if (!strcmp(first, "if") || !strcmp(first, "for") || !strcmp(first, "loop"))
             depth++;
         else if (!strcmp(first, "end")) {
-            if (depth == 0) return b->count;  /* our closing end */
+            if (depth == 0) return overflow ? -1 : b->count;  /* our closing end */
             depth--;
         }
 
-        if (b->count < BLOCK_MAX) {
+        if (!overflow) {
+            if (b->count >= BLOCK_MAX) {
+                puts("block: too many lines");
+                overflow = 1;
+                continue;
+            }
             char *copy = malloc(strlen(tmp) + 1);
             if (copy) {
                 strcpy(copy, tmp);
                 b->lines[b->count++] = copy;
+            } else {
+                puts("block: out of memory");
+                overflow = 1;
             }
         }
     }
@@ -375,28 +494,36 @@ static int g_break = 0;
 /* ── built-in commands ───────────────────────────────────────────────────── */
 
 /* Forward declaration of cmd_help (defined after command table). */
-static int cmd_help(const char *arg);
+static int eval_argv(int argc, char **argv);
+static int cmd_help(int argc, char **argv);
 
-#define IS_HELP(a) ((a) && strcmp((a), "--help") == 0)
+#define IS_HELP(argc, argv) ((argc) > 0 && (argv)[0] && strcmp((argv)[0], "--help") == 0)
 
-static int cmd_echo(const char *arg) {
-    if (IS_HELP(arg)) {
+static int cmd_echo(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) {
         puts("usage: echo <text>");
         puts("  write text to stdout followed by a newline");
         return 0;
     }
-    if (arg) puts(arg);
-    else     write(STDOUT_FILENO, "\n", 1);
+    if (argc <= 0) {
+        write(STDOUT_FILENO, "\n", 1);
+        return 0;
+    }
+    for (int i = 0; i < argc; i++) {
+        if (i > 0) write(STDOUT_FILENO, " ", 1);
+        write(STDOUT_FILENO, argv[i], strlen(argv[i]));
+    }
+    write(STDOUT_FILENO, "\n", 1);
     return 0;
 }
 
-static int cmd_ls(const char *path) {
-    if (IS_HELP(path)) {
+static int cmd_ls(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) {
         puts("usage: ls [path]");
         puts("  list directory entries (default: /)");
         return 0;
     }
-    if (!path || !*path) path = "/";
+    const char *path = (argc > 0 && argv[0] && *argv[0]) ? argv[0] : "/";
     int fd = open(path, O_RDONLY);
     if (fd < 0) { puts("ls: open failed"); return -1; }
 
@@ -410,13 +537,14 @@ static int cmd_ls(const char *path) {
     return 0;
 }
 
-static int cmd_cat(const char *path) {
-    if (IS_HELP(path)) {
+static int cmd_cat(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) {
         puts("usage: cat <path>");
         puts("  print file to stdout");
         return 0;
     }
-    if (!path || !*path) { puts("cat: missing path"); return -1; }
+    if (argc <= 0 || !argv[0] || !*argv[0]) { puts("cat: missing path"); return -1; }
+    const char *path = argv[0];
     int fd = open(path, O_RDONLY);
     if (fd < 0) { puts("cat: open failed"); return -1; }
 
@@ -428,44 +556,44 @@ static int cmd_cat(const char *path) {
     return 0;
 }
 
-static int cmd_exec(const char *path) {
-    if (IS_HELP(path)) {
+static int cmd_exec(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) {
         puts("usage: exec <path>");
         puts("  spawn a program and return immediately (async)");
         return 0;
     }
-    if (!path || !*path) { puts("exec: missing path"); return -1; }
-    int pid = exec(path);
+    if (argc <= 0 || !argv[0] || !*argv[0]) { puts("exec: missing path"); return -1; }
+    int pid = execv(argv[0], (const char **)argv, argc);
     if (pid < 0) { puts("exec: failed"); return -1; }
     printf("  pid %d\n", pid);
     return 0;
 }
 
-static int cmd_run(const char *path) {
-    if (IS_HELP(path)) {
+static int cmd_run(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) {
         puts("usage: run <path>");
         puts("  spawn a program and wait for it to exit");
         return 0;
     }
-    if (!path || !*path) { puts("run: missing path"); return -1; }
-    int pid = exec(path);
+    if (argc <= 0 || !argv[0] || !*argv[0]) { puts("run: missing path"); return -1; }
+    int pid = execv(argv[0], (const char **)argv, argc);
     if (pid < 0) { puts("run: exec failed"); return -1; }
     return waitpid(pid);   /* returns child's exit code */
 }
 
-static int cmd_rm(const char *path) {
-    if (IS_HELP(path)) {
+static int cmd_rm(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) {
         puts("usage: rm <path>");
         puts("  remove a file; rm /proc/<pid> kills a process");
         return 0;
     }
-    if (!path || !*path) { puts("rm: missing path"); return -1; }
-    if (unlink(path) < 0) { puts("rm: failed"); return -1; }
+    if (argc <= 0 || !argv[0] || !*argv[0]) { puts("rm: missing path"); return -1; }
+    if (unlink(argv[0]) < 0) { puts("rm: failed"); return -1; }
     return 0;
 }
 
-static int cmd_pid(const char *arg) {
-    if (IS_HELP(arg)) {
+static int cmd_pid(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) {
         puts("usage: pid");
         puts("  print the process ID of this shell");
         return 0;
@@ -476,38 +604,56 @@ static int cmd_pid(const char *arg) {
 
 /* ── variable built-ins ──────────────────────────────────────────────────── */
 
-static int cmd_set(const char *arg) {
-    if (IS_HELP(arg)) {
+static int cmd_set(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) {
         puts("usage: set name value");
         puts("  store value in $name; use in commands as $name");
         return 0;
     }
-    if (!arg || !*arg) { puts("set: usage: set name value"); return -1; }
+    if (argc < 2 || !argv[0] || !*argv[0]) { puts("set: usage: set name value"); return -1; }
+    char value[VAR_VAL];
+    value[0] = '\0';
+    for (int i = 1; i < argc; i++) {
+        size_t used = strlen(value);
+        if (i > 1) {
+            if (used + 1 >= VAR_VAL) {
+                puts("set: value too long");
+                return -1;
+            }
+            value[used++] = ' ';
+            value[used] = '\0';
+        }
+        const char *src = argv[i];
+        while (*src) {
+            if (used >= VAR_VAL - 1) {
+                puts("set: value too long");
+                return -1;
+            }
+            value[used++] = *src++;
+        }
+        value[used] = '\0';
+    }
 
-    char name[VAR_NAME];
-    int ni = 0;
-    const char *p = arg;
-    while (*p && *p != ' ' && ni < VAR_NAME - 1) name[ni++] = *p++;
-    name[ni] = '\0';
-    while (*p == ' ') p++;
-
-    var_set(name, p);
+    if (var_set(argv[0], value) < 0) {
+        puts("set: invalid variable");
+        return -1;
+    }
     return 0;
 }
 
-static int cmd_unset(const char *arg) {
-    if (IS_HELP(arg)) {
+static int cmd_unset(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) {
         puts("usage: unset name");
         puts("  remove variable $name");
         return 0;
     }
-    if (!arg || !*arg) { puts("unset: missing name"); return -1; }
-    var_unset(arg);
+    if (argc <= 0 || !argv[0] || !*argv[0]) { puts("unset: missing name"); return -1; }
+    var_unset(argv[0]);
     return 0;
 }
 
-static int cmd_env(const char *arg) {
-    (void)arg;
+static int cmd_env(int argc, char **argv) {
+    (void)argc; (void)argv;
     for (int i = 0; i < var_count; i++) {
         write(STDOUT_FILENO, var_names[i], strlen(var_names[i]));
         write(STDOUT_FILENO, "=", 1);
@@ -516,8 +662,8 @@ static int cmd_env(const char *arg) {
     return 0;
 }
 
-static int cmd_true(const char *arg)  { (void)arg; return 0;  }
-static int cmd_false(const char *arg) { (void)arg; return 1;  }
+static int cmd_true(int argc, char **argv)  { (void)argc; (void)argv; return 0;  }
+static int cmd_false(int argc, char **argv) { (void)argc; (void)argv; return 1;  }
 
 /* ── control flow built-ins ──────────────────────────────────────────────── */
 
@@ -530,22 +676,21 @@ static int cmd_false(const char *arg) { (void)arg; return 1;  }
  * is typed.  This is the immediate-evaluation model — simpler than deferred
  * parsing, and natural for both interactive and script use.
  */
-static int cmd_if(const char *arg) {
-    if (IS_HELP(arg)) {
+static int cmd_if(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) {
         puts("usage: if <cmd>");
         puts("  execute block if <cmd> exits 0; terminated by 'end'");
         return 0;
     }
 
-    char cond[LINE_MAX];
-    strncpy(cond, arg ? arg : "", LINE_MAX - 1);
-    cond[LINE_MAX - 1] = '\0';
-
     /* Run the condition now, then collect the body. */
-    int cond_result = eval_line(cond);
+    int cond_result = (argc > 0) ? eval_argv(argc, argv) : -1;
 
     block_t body;
-    block_collect(&body);
+    if (block_collect(&body) < 0) {
+        block_free(&body);
+        return -1;
+    }
 
     if (cond_result == 0) eval_block(&body);
 
@@ -558,47 +703,35 @@ static int cmd_if(const char *arg) {
  *   ...body...
  * end
  */
-static int cmd_for(const char *arg) {
-    if (IS_HELP(arg)) {
+static int cmd_for(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) {
         puts("usage: for name in word [word ...]");
         puts("  iterate over words, setting $name each time");
         return 0;
     }
-    if (!arg || !*arg) { puts("for: usage: for name in words"); return -1; }
+    if (argc < 3) { puts("for: usage: for name in words"); return -1; }
 
-    char buf[LINE_MAX];
-    strncpy(buf, arg, LINE_MAX - 1);
-    buf[LINE_MAX - 1] = '\0';
-
-    /* Parse: name */
-    char *p = buf;
-    char *name = p;
-    while (*p && *p != ' ') p++;
-    if (*p) *p++ = '\0';
-    while (*p == ' ') p++;
-
-    /* Expect "in" */
-    if (strncmp(p, "in", 2) != 0 || (p[2] != ' ' && p[2] != '\0')) {
+    if (strcmp(argv[1], "in") != 0) {
         puts("for: expected 'in' after name");
         return -1;
     }
-    p += 2;
-    while (*p == ' ') p++;
 
     /* Collect the body block. */
     block_t body;
-    block_collect(&body);
+    if (block_collect(&body) < 0) {
+        block_free(&body);
+        return -1;
+    }
 
     /* Iterate over words. */
     g_break = 0;
-    while (*p && !g_break) {
-        char word[VAR_VAL];
-        int wi = 0;
-        while (*p && *p != ' ' && wi < VAR_VAL - 1) word[wi++] = *p++;
-        word[wi] = '\0';
-        while (*p == ' ') p++;
-        if (!word[0]) break;
-        var_set(name, word);
+    for (int i = 2; i < argc && !g_break; i++) {
+        if (var_set(argv[0], argv[i]) < 0) {
+            puts("for: variable too long");
+            g_break = 0;
+            block_free(&body);
+            return -1;
+        }
         eval_block(&body);
     }
     g_break = 0;
@@ -614,15 +747,18 @@ static int cmd_for(const char *arg) {
  *
  * Runs the body forever until 'break' is executed inside it.
  */
-static int cmd_loop(const char *arg) {
-    if (IS_HELP(arg)) {
+static int cmd_loop(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) {
         puts("usage: loop");
         puts("  repeat block until 'break'; terminated by 'end'");
         return 0;
     }
 
     block_t body;
-    block_collect(&body);
+    if (block_collect(&body) < 0) {
+        block_free(&body);
+        return -1;
+    }
 
     g_break = 0;
     while (!g_break) {
@@ -634,15 +770,15 @@ static int cmd_loop(const char *arg) {
     return 0;
 }
 
-static int cmd_break(const char *arg) {
-    if (IS_HELP(arg)) { puts("usage: break"); puts("  exit the innermost loop"); return 0; }
+static int cmd_break(int argc, char **argv) {
+    if (IS_HELP(argc, argv)) { puts("usage: break"); puts("  exit the innermost loop"); return 0; }
     g_break = 1;
     return 0;
 }
 
 /* ── command table ───────────────────────────────────────────────────────── */
 
-typedef int (*cmd_fn_t)(const char *);
+typedef int (*cmd_fn_t)(int argc, char **argv);
 
 typedef struct {
     const char *name;
@@ -677,15 +813,15 @@ static const cmd_entry_t cmds[] = {
 
 /* ── help ────────────────────────────────────────────────────────────────── */
 
-static int cmd_help(const char *arg) {
-    if (arg && *arg) {
-        if (strcmp(arg, "--help") == 0) {
+static int cmd_help(int argc, char **argv) {
+    if (argc > 0 && argv[0] && *argv[0]) {
+        if (strcmp(argv[0], "--help") == 0) {
             puts("usage: help [cmd]");
             puts("  list all built-in commands, or describe one");
             return 0;
         }
         for (int i = 0; cmds[i].name; i++) {
-            if (strcmp(cmds[i].name, arg) == 0) {
+            if (strcmp(cmds[i].name, argv[0]) == 0) {
                 puts(cmds[i].usage);
                 puts(cmds[i].desc);
                 return 0;
@@ -729,58 +865,64 @@ static int eval_block(block_t *b) {
 }
 
 /*
- * eval_line: evaluate one command line.
- *  - expands $variables
+ * eval_argv: evaluate a parsed argv vector.
  *  - handles pipelines
  *  - dispatches to built-ins or external paths
  * Returns the command's exit code (0 = success, non-zero = failure).
  */
-static int eval_line(char *line) {
-    if (!line) return 0;
+static int eval_argv(int argc, char **argv) {
+    if (argc <= 0 || !argv || !argv[0] || !argv[0][0]) return 0;
 
-    /* trim leading spaces */
-    while (*line == ' ') line++;
-    if (!*line || *line == '#') return 0;   /* empty or comment */
-
-    /* variable expansion */
-    char expanded[LINE_MAX * 2];
-    expand_vars(line, expanded, (int)sizeof(expanded));
-
-    /* pipeline check */
-    char *pipe_pos = NULL;
-    for (int i = 0; expanded[i]; i++) {
-        if (expanded[i] == '|') { pipe_pos = &expanded[i]; break; }
-    }
-    if (pipe_pos) {
-        *pipe_pos = '\0';
-        execute_pipeline(expanded, pipe_pos + 1);
-        return 0;   /* pipeline exit code not propagated in v1 */
-    }
-
-    /* split command + arg */
-    char *arg = split_arg(expanded);
-    const char *cmd = expanded;
-
-    /* look up in built-in table */
     for (int i = 0; cmds[i].name; i++) {
-        if (strcmp(cmd, cmds[i].name) == 0)
-            return cmds[i].fn(arg);
+        if (strcmp(argv[0], cmds[i].name) == 0)
+            return cmds[i].fn(argc - 1, argv + 1);
     }
 
-    /* external path: anything starting with / */
-    if (cmd[0] == '/') {
-        const char *argv_arr[3];
-        int narg = 1;
-        argv_arr[0] = cmd;
-        if (arg && arg[0]) { argv_arr[1] = arg; narg = 2; }
-        argv_arr[narg] = NULL;
-        int pid = execv(cmd, argv_arr, narg);
+    if (argv[0][0] == '/') {
+        int pid = execv(argv[0], (const char **)argv, argc);
         if (pid < 0) { puts("sh: exec failed"); return -1; }
         return waitpid(pid);
     }
 
     puts("sh: unknown command");
     return -1;
+}
+
+/*
+ * eval_line: evaluate one command line.
+ *  - expands $variables
+ *  - tokenizes with quoting/escaping support
+ *  - dispatches through eval_argv()
+ * Returns the command's exit code (0 = success, non-zero = failure).
+ */
+static int eval_line(char *line) {
+    if (!line) return 0;
+
+    while (*line == ' ') line++;
+    if (!*line || *line == '#') return 0;
+
+    char expanded[LINE_MAX * 2];
+    if (expand_vars(line, expanded, (int)sizeof(expanded)) < 0) {
+        puts("sh: parse error");
+        return -1;
+    }
+
+    char argv_buf[ARG_MAX][LINE_MAX];
+    char *argv[ARG_MAX + 1];
+    int pipe_at = -1;
+    int argc = split_argv(expanded, argv_buf, argv, &pipe_at);
+    if (argc < 0) {
+        puts("sh: parse error");
+        return -1;
+    }
+    if (pipe_at >= 0) {
+        if (pipe_at <= 0 || pipe_at >= argc) {
+            puts("pipe: empty command");
+            return -1;
+        }
+        return execute_pipeline(pipe_at, argv, argc - pipe_at, argv + pipe_at);
+    }
+    return eval_argv(argc, argv);
 }
 
 /* ── main loop ───────────────────────────────────────────────────────────── */
@@ -791,7 +933,9 @@ int main(void) {
     char line[LINE_MAX];
     for (;;) {
         write(STDOUT_FILENO, "sh> ", 4);
-        if (readline(line, sizeof(line)) == 0) continue;
+        int n = readline(line, sizeof(line));
+        if (n < 0) break;
+        if (n == 0) continue;
         hist_add(line);
         eval_line(line);
     }

@@ -1,6 +1,44 @@
 # DOS/9 — Claude Code Context
 
-DOS/9 is a hobbyist OS kernel targeting 32-bit x86. It is conceptually inspired by Plan 9 (per-process namespaces, everything-is-a-file) but runs as a native kernel, not a hosted process. The goal is a working kernel with a shell, VFS, process model, and eventually Gemini/Gopher client support.
+DOS/9 is a hobbyist OS kernel targeting 32-bit x86. It is conceptually inspired by Plan 9 (per-process namespaces, everything-is-a-file) but runs as a native kernel, not a hosted process. The goal is a working kernel with a shell, VFS, process model, and small-web client support (Gemini, Gopher, RSS, Finger, IRC, and NNTP).
+
+Development target and compatibility policy:
+
+- QEMU is the fast inner-loop test harness.
+- VMs are the compatibility and integration target.
+- Old physical hardware is a first-class target, including Pentium-class machines.
+- New code should avoid assuming emulator-only behavior unless it is explicitly gated or documented.
+
+Compatibility policy:
+
+- Set the support floor to 32-bit Pentium-class x86 with conservative BIOS-era behavior.
+- Write to that floor directly; do not assume QEMU conveniences are universal.
+- Detect optional features and provide safe fallbacks.
+- Use conservative VMs as the default pre-hardware test environment.
+- Keep the hardware-readiness checklist current for timing, storage, and networking changes.
+
+Hardware readiness gate before calling a feature deployment-ready:
+
+- RTC/time must work on real hardware without relying on the fallback Unix timestamp.
+- Networking must work without SLIRP-only defaults or other QEMU-specific assumptions.
+- Serial mirroring must fail safely if COM1 is absent or unwired.
+- New fixed-size limits need an explicit reason and a growth path.
+- Boot, shell, disk, and Gemini should still work under a conservative VM setup.
+- Major timing, storage, or networking changes should be checked on at least one real Pentium-class machine when available.
+
+Compatibility matrix:
+
+- `dev-qemu` for fast iteration
+- `vm-baseline` for boot and core device checks
+- `vm-guestfwd` for local TCP smoke tests without external DNS/TLS. Pair `scripts/guestfwd-server.sh` on the host with `make smoke-net`.
+- `vm-network` for DNS, TLS, and Gemini validation
+- `pentium-floor` for real hardware validation when available
+
+Known non-blocking limitation:
+
+- Shell parsing is intentionally small and now supports basic quoting/escaping, but it is still not a full POSIX shell. Revisit it only when user-facing commands need richer shell semantics.
+- `make smoke-shell` is the repeatable shell regression check; it feeds `tests/shellreg.txt` into the guest shell and asserts the expected output.
+- The shell smoke set also covers package metadata and reinstall flow with `/disk/pkg info /disk/hello.d9p` and `/disk/pkg install /disk/hello.d9p`, plus the `time`, formatter, allocator, argv, pipeline, and basic `if`/`for` probes already on disk.
 
 ---
 
@@ -15,7 +53,7 @@ These are live browser resources — consult them when the local reference docs 
 | Little OS Book | https://littleosbook.github.io | Concise 32-bit OS walkthrough — matches DOS/9's target exactly. |
 | OSTEP (online) | https://pages.cs.wisc.edu/~remzi/OSTEP | Chapter-by-chapter OS theory reference. |
 | Plan 9 papers | https://9p.io/sys/doc | Authoritative source for Plan 9 namespace and VFS design. |
-| xv6 source (x86) | https://github.com/mit-pdos/xv6-public | Teaching OS — use for "how is this structured?" lookups. Local copy in docs/references/xv6/. |
+| xv6 source (x86) | Local copy in `docs/references/xv6/` | Teaching OS — use for "how is this structured?" lookups. |
 
 ---
 
@@ -35,36 +73,22 @@ All under `docs/references/`. Key items:
 
 ## Repository
 
-**GitHub only.** This project lives at:
+This workspace is local-only.
 
-```
-https://github.com/njb1966/dos9
-git remote: github-dos9
-```
+The working copy for Codex lives at:
 
-The local working copy is inside a monorepo at
-`/media/nick/1TB_Storage1/projects/tech/DOS9` (also symlinked from
-`/home/nick/projects/tech/DOS9`). The git root is one level up
-(`/media/nick/1TB_Storage1/projects`), so all git commands must be
-run from there.
+`/media/nick/1TB_Storage1/projects/tech/DOS9_codex`
 
-**Push workflow:**
-```bash
-# From /media/nick/1TB_Storage1/projects (the monorepo root):
-git add --sparse tech/DOS9/<path>   # stage new files outside kernel/
-git add tech/DOS9/<path>            # stage files in tracked sparse paths
-git commit -m "..."
-git subtree split --prefix=tech/DOS9 -b dos9-push
-git push --force github-dos9 dos9-push:main
-git branch -D dos9-push
-```
+Do not write to `tech/DOS9` from this workspace. That directory is the
+separate Claude Code build.
 
-**Do NOT push to Gitea (`origin`).** `origin` is the infrastructure
-monorepo at `100.116.111.80:3000` — a different repo for a different
-purpose. All DOS9 work goes to GitHub only.
+There is no push workflow for this copy. Keep all edits, build outputs,
+and scratch work under `tech/DOS9_codex/`.
 
 ---
 
 ## Project Status
 
-See `PLAN.md` for current phase and task breakdown.
+Phase 4c readers are complete; the remaining open item in that bucket is the aspirational 9P-style remote mount idea.
+
+See `PLAN.md` for the current phase and task breakdown.

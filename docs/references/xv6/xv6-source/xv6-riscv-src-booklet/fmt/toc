@@ -1,0 +1,41 @@
+The numbers to the left of the file names in the table are sheet numbers.
+The source code has been printed in a double column format with fifty
+lines per column, giving one hundred lines per sheet (or page).
+Thus there is a convenient relationship between line numbers and sheet numbers.
+
+
+# basic headers		29 kernel/swtch.S	56 kernel/file.c
+09 kernel/types.h	29 kernel/kalloc.c	58 kernel/sysfile.c
+01 kernel/param.h				64 kernel/exec.c
+02 kernel/memlayout.h	# system calls		
+03 kernel/defs.h	30 kernel/trampoline.S	# pipes
+05 kernel/riscv.h	32 kernel/kernelvec.S	66 kernel/pipe.c
+09 kernel/types.h	33 kernel/trap.c	
+09 kernel/elf.h		35 kernel/syscall.h	# string operations
+			36 kernel/syscall.c	67 kernel/string.c
+# entering xv6		37 kernel/sysproc.c	
+10 kernel/entry.S				# low-level hardware
+10 kernel/start.c	# file system		69 kernel/plic.c
+11 kernel/main.c	39 kernel/buf.h		69 kernel/console.c
+			39 kernel/sleeplock.h	72 kernel/uart.c
+# locks			40 kernel/fcntl.h	74 kernel/virtio_disk.c
+12 kernel/spinlock.h	40 kernel/stat.h	
+12 kernel/spinlock.c	41 kernel/fs.h		# user-level
+			42 kernel/file.h	77 user/init.c
+# processes		42 kernel/bio.c		78 user/sh.c
+14 kernel/vm.c		44 kernel/sleeplock.c	
+19 kernel/proc.h	45 kernel/log.c		# link
+21 kernel/proc.c	48 kernel/fs.c		84 kernel/kernel.ld
+
+
+The source listing is preceded by a cross-reference that lists every defined 
+constant, struct, global variable, and function in xv6.  Each entry gives,
+on the same line as the name, the line number (or, in a few cases, numbers)
+where the name is defined.  Successive lines in an entry list the line
+numbers where the name is used.  For example, this entry:
+
+    swtch 2658
+        0374 2428 2466 2657 2658
+
+indicates that swtch is defined on line 2658 and is mentioned on five lines
+on sheets 03, 24, and 26.

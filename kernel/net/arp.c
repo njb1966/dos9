@@ -2,6 +2,7 @@
 #include <ethernet.h>
 #include <netif.h>
 #include <net.h>
+#include <terminal.h>
 #include <string.h>
 #include <stddef.h>
 
@@ -53,6 +54,12 @@ void arp_add(uint32_t ip, const uint8_t *mac) {
 }
 
 static void arp_send_request(uint32_t target_ip) {
+    terminal_write("[ARP-REQ] ");
+    terminal_writedec((target_ip >> 24) & 0xFF); terminal_write(".");
+    terminal_writedec((target_ip >> 16) & 0xFF); terminal_write(".");
+    terminal_writedec((target_ip >>  8) & 0xFF); terminal_write(".");
+    terminal_writedec(target_ip & 0xFF);
+    terminal_write("\n");
     arp_pkt_t p;
     p.htype = htons(1);
     p.ptype = htons(0x0800);
@@ -70,8 +77,21 @@ void arp_rx(const void *pkt, uint16_t len) {
     if (len < sizeof(arp_pkt_t)) return;
     const arp_pkt_t *p = (const arp_pkt_t *)pkt;
     if (ntohs(p->htype) != 1 || ntohs(p->ptype) != 0x0800) return;
-
+    if (p->hlen != 6u || p->plen != 4u) return;
+    terminal_write("[ARP-RX] ");
     uint32_t sender_ip = ntohl(p->spa);
+    terminal_writedec((sender_ip >> 24) & 0xFF); terminal_write(".");
+    terminal_writedec((sender_ip >> 16) & 0xFF); terminal_write(".");
+    terminal_writedec((sender_ip >>  8) & 0xFF); terminal_write(".");
+    terminal_writedec(sender_ip & 0xFF);
+    terminal_write(" mac=");
+    const char hex[] = "0123456789abcdef";
+    for (int i = 0; i < 6; i++) {
+        terminal_putchar(hex[p->sha[i] >> 4]);
+        terminal_putchar(hex[p->sha[i] & 0xF]);
+        if (i < 5) terminal_putchar(':');
+    }
+    terminal_write("\n");
     arp_add(sender_ip, p->sha);
 
     if (ntohs(p->op) == ARP_OP_REQ && ntohl(p->tpa) == g_netif.ip) {

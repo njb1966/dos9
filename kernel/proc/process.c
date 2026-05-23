@@ -15,6 +15,7 @@
 #define USER_STACK_TOP   0xBFFF0000u /* user-space stack pointer (grows down) */
 #define USER_STACK_PAGES 4u          /* 16KB user stack (4 × 4KB pages) */
 #define PAGE_SIZE        4096u
+#define MAX_USER_ARGC    16
 
 /* Defined in switch.S */
 extern void context_switch(process_t *prev, process_t *next);
@@ -32,10 +33,53 @@ static uint32_t get_cr3(void) {
     return v;
 }
 
-static void name_copy(char *dst, const char *src) {
+static int name_copy(char *dst, const char *src) {
     int i;
+    if (!src || !*src) return -1;
     for (i = 0; i < 15 && src[i]; i++) dst[i] = src[i];
+    if (src[i]) return -1;
     dst[i] = '\0';
+    return 0;
+}
+
+static uint32_t alloc_pid(void) {
+    for (;;) {
+        uint32_t pid = next_pid++;
+        if (pid == 0) continue;
+        int in_use = 0;
+        for (int i = 0; i < n_procs; i++) {
+            process_t *p = proc_table[i];
+            if (p && p->pid == pid && p->state != PROC_DEAD) {
+                in_use = 1;
+                break;
+            }
+        }
+        if (!in_use) return pid;
+    }
+}
+
+/*
+ * Tear down a user page directory created for a soon-to-be-abandoned
+ * process.  The kernel half is shared; only the user mappings are owned
+ * by this page directory.
+ */
+static void destroy_user_pd(uint32_t pd_phys) {
+    uint32_t *pd = (uint32_t *)VIRT(pd_phys);
+
+    for (uint32_t pd_idx = 0; pd_idx < 768u; pd_idx++) {
+        if (!(pd[pd_idx] & PF_PRESENT)) continue;
+
+        uint32_t *pt = (uint32_t *)VIRT(pd[pd_idx] & ~0xFFFu);
+        for (uint32_t pt_idx = 0; pt_idx < 1024u; pt_idx++) {
+            if (!(pt[pt_idx] & PF_PRESENT)) continue;
+            pmm_free_frame((void *)(uintptr_t)(pt[pt_idx] & ~0xFFFu));
+        }
+
+        pmm_free_frame((void *)(uintptr_t)(pd[pd_idx] & ~0xFFFu));
+        pd[pd_idx] = 0;
+    }
+
+    pmm_free_frame((void *)(uintptr_t)pd_phys);
 }
 
 /*
@@ -77,7 +121,7 @@ void process_init(void) {
     process_t *p = kmalloc(sizeof(process_t));
     p->esp      = 0;            /* set on first context_switch away */
     p->page_dir = get_cr3();
-    p->pid      = next_pid++;
+    p->pid      = alloc_pid();
     p->state    = PROC_RUNNING;
     name_copy(p->name, "init");
     p->entry    = NULL;
@@ -91,14 +135,16 @@ void process_init(void) {
     irq_register(IRQ_TIMER, timer_tick);
 }
 
-/* Recycle a dead slot or claim the next free one.  Frees the dead
-   process's kernel stack and struct; user page directories are not
-   freed here (no PMM walk API yet — known leak). */
-static int proc_alloc_slot(void) {
+/* Recycle a dead slot or claim the next free one.
+   `new_slot_out` is set when a fresh table entry was reserved. */
+static int proc_alloc_slot(int *new_slot_out) {
+    if (new_slot_out) *new_slot_out = 0;
     for (int i = 0; i < n_procs; i++) {
         process_t *old = proc_table[i];
         if (old && old->state == PROC_DEAD) {
             vfs_close_table(old->fds);   /* handles kill path that skips process_exit */
+            if (old->brk != 0)
+                destroy_user_pd(old->page_dir);
             if (old->stack) kfree(old->stack);
             kfree(old);
             proc_table[i] = NULL;
@@ -106,15 +152,23 @@ static int proc_alloc_slot(void) {
         }
     }
     if (n_procs >= MAX_PROCS) return -1;
+    if (new_slot_out) *new_slot_out = 1;
     return n_procs++;
 }
 
 process_t *process_create(void (*entry)(void), const char *name) {
-    int slot = proc_alloc_slot();
+    int fresh = 0;
+    int slot = proc_alloc_slot(&fresh);
     if (slot < 0) return NULL;
 
     process_t *p   = kmalloc(sizeof(process_t));
     uint8_t   *stk = kmalloc(KSTACK_SIZE);
+    if (!p || !stk) {
+        if (stk) kfree(stk);
+        if (p) kfree(p);
+        if (fresh && n_procs > 0 && slot == n_procs - 1) n_procs--;
+        return NULL;
+    }
 
     /*
      * Build a fake context_switch frame on the new stack.
@@ -137,9 +191,14 @@ process_t *process_create(void (*entry)(void), const char *name) {
 
     p->esp      = (uint32_t)top;
     p->page_dir = get_cr3();
-    p->pid      = next_pid++;
+    p->pid      = alloc_pid();
     p->state     = PROC_READY;
-    name_copy(p->name, name);
+    if (name_copy(p->name, name) < 0) {
+        kfree(stk);
+        kfree(p);
+        if (fresh && n_procs > 0 && slot == n_procs - 1) n_procs--;
+        return NULL;
+    }
     p->entry     = entry;
     p->stack     = stk;
     p->brk       = 0;
@@ -154,6 +213,11 @@ void process_exit(int32_t code) {
     vfs_close_table(proc_table[cur]->fds);
     proc_table[cur]->exit_code = code;
     proc_table[cur]->state = PROC_DEAD;
+    /* Wake any process blocked in sys_waitpid so it can reap this child. */
+    for (int i = 0; i < n_procs; i++) {
+        if (proc_table[i] && proc_table[i]->state == PROC_BLOCKED)
+            proc_table[i]->state = PROC_READY;
+    }
     for (;;) schedule();
 }
 
@@ -164,6 +228,10 @@ int process_kill(uint32_t pid) {
         if (!p || p->pid != pid) continue;
         if (p->state == PROC_DEAD) return 0;
         p->state = PROC_DEAD;
+        for (int j = 0; j < n_procs; j++) {
+            if (proc_table[j] && proc_table[j]->state == PROC_BLOCKED)
+                proc_table[j]->state = PROC_READY;
+        }
         if (i == cur) {                     /* killed self → never return */
             for (;;) schedule();
         }
@@ -174,13 +242,20 @@ int process_kill(uint32_t pid) {
 
 int process_count(void) { return n_procs; }
 
+uint32_t process_ticks(void) { return ticks; }
+
 process_t *process_get(int idx) {
     if (idx < 0 || idx >= n_procs) return NULL;
     return proc_table[idx];
 }
 
 void schedule(void) {
-    if (n_procs <= 1) return;
+    if (n_procs <= 1) {
+        /* Single process — sleep until the next interrupt so device I/O
+           and timers can make progress without busy-spinning. */
+        __asm__ volatile("sti; hlt");
+        return;
+    }
 
     int next = cur;
     for (int i = 1; i <= n_procs; i++) {
@@ -190,11 +265,17 @@ void schedule(void) {
             break;
         }
     }
-    if (next == cur) return;
+    if (next == cur) {
+        /* No other runnable process — enable IRQs and wait for the next
+           interrupt before returning to caller. */
+        __asm__ volatile("sti; hlt");
+        return;
+    }
 
     process_t *prev = proc_table[cur];
     process_t *nxt  = proc_table[next];
-    if (prev->state != PROC_DEAD) prev->state = PROC_READY;
+    /* Only PROC_RUNNING → PROC_READY; preserve PROC_BLOCKED set by waitpid. */
+    if (prev->state == PROC_RUNNING) prev->state = PROC_READY;
     nxt->state  = PROC_RUNNING;
     cur         = next;
     /* Keep TSS.esp0 pointing at the new process's kernel stack top so that
@@ -215,11 +296,11 @@ void schedule(void) {
 static uint32_t write_user_argv(uint8_t *frame_data,
                                  const char **argv, int argc) {
     if (!frame_data || argc <= 0 || !argv) return 0;
-    if (argc > 8) argc = 8;
+    if (argc > MAX_USER_ARGC) return 0;
 
     uint32_t off = PAGE_SIZE;  /* grows downward */
 
-    uint32_t str_off[8];
+    uint32_t str_off[MAX_USER_ARGC];
     uint32_t page_ubase = USER_STACK_TOP - PAGE_SIZE;  /* 0xBFFE0000 */
 
     /* Write strings high→low (last arg first). */
@@ -228,7 +309,7 @@ static uint32_t write_user_argv(uint8_t *frame_data,
         uint32_t len = 0;
         while (s[len]) len++;
         len++;                      /* include NUL */
-        if (len > 128) len = 128;
+        if (len > 128) return 0;
         if (off < len) return 0;
         off -= len;
         for (uint32_t j = 0; j < len - 1; j++)
@@ -262,20 +343,41 @@ static uint32_t write_user_argv(uint8_t *frame_data,
 process_t *process_create_user(uint32_t entry_vaddr, const char *name,
                                 uint32_t pd_phys,
                                 const char **argv, int argc) {
-    int slot = proc_alloc_slot();
+    int fresh = 0;
+    int slot = proc_alloc_slot(&fresh);
     if (slot < 0) return NULL;
 
     process_t *p   = kmalloc(sizeof(process_t));
     uint8_t   *stk = kmalloc(KSTACK_SIZE);
+    if (!p || !stk) {
+        if (stk) kfree(stk);
+        if (p) kfree(p);
+        if (fresh && n_procs > 0 && slot == n_procs - 1) n_procs--;
+        return NULL;
+    }
 
     /* Allocate and map user-space stack pages; save topmost frame pointer. */
     uint8_t *top_frame_kptr = NULL;
     for (uint32_t i = 0; i < USER_STACK_PAGES; i++) {
         uint32_t vaddr = USER_STACK_TOP - (USER_STACK_PAGES - i) * PAGE_SIZE;
         uint32_t frame = (uint32_t)pmm_alloc_frame();
+        if (!frame) {
+            destroy_user_pd(pd_phys);
+            kfree(stk);
+            kfree(p);
+            if (fresh && n_procs > 0 && slot == n_procs - 1) n_procs--;
+            return NULL;
+        }
         memset((void *)VIRT(frame), 0, PAGE_SIZE);
-        vmm_map_page_in(pd_phys, vaddr, frame,
-                        PF_PRESENT | PF_WRITE | PF_USER);
+        if (vmm_map_page_in(pd_phys, vaddr, frame,
+                            PF_PRESENT | PF_WRITE | PF_USER) < 0) {
+            pmm_free_frame((void *)(uintptr_t)frame);
+            destroy_user_pd(pd_phys);
+            kfree(stk);
+            kfree(p);
+            if (fresh && n_procs > 0 && slot == n_procs - 1) n_procs--;
+            return NULL;
+        }
         if (i == USER_STACK_PAGES - 1)
             top_frame_kptr = (uint8_t *)VIRT(frame);
     }
@@ -293,6 +395,13 @@ process_t *process_create_user(uint32_t entry_vaddr, const char *name,
         }
         uint32_t esp = write_user_argv(top_frame_kptr, use_argv, synth_argc);
         if (esp) user_esp = esp;
+        else {
+            destroy_user_pd(pd_phys);
+            kfree(stk);
+            kfree(p);
+            if (fresh && n_procs > 0 && slot == n_procs - 1) n_procs--;
+            return NULL;
+        }
     }
 
     /* Build kernel stack fake frame: ret → user_trampoline. */
@@ -305,9 +414,15 @@ process_t *process_create_user(uint32_t entry_vaddr, const char *name,
 
     p->esp        = (uint32_t)top;
     p->page_dir   = pd_phys;
-    p->pid        = next_pid++;
     p->state      = PROC_READY;
-    name_copy(p->name, name);
+    if (name_copy(p->name, name) < 0) {
+        destroy_user_pd(pd_phys);
+        kfree(stk);
+        kfree(p);
+        if (fresh && n_procs > 0 && slot == n_procs - 1) n_procs--;
+        return NULL;
+    }
+    p->pid        = alloc_pid();
     p->entry      = (void (*)(void))(uintptr_t)entry_vaddr;
     p->stack      = stk;
     p->user_stack = user_esp;

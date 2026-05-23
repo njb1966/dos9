@@ -17,10 +17,14 @@ static inline uint32_t ntohl(uint32_t v) { return htonl(v); }
 
 /* 16-bit one's-complement checksum over `len` bytes of `data`. */
 static inline uint16_t ip_checksum(const void *data, uint32_t len) {
-    const uint16_t *p  = (const uint16_t *)data;
-    uint32_t        sum = 0;
-    while (len > 1) { sum += *p++; len -= 2; }
-    if (len) sum += *(const uint8_t *)p;
+    const uint8_t *p = (const uint8_t *)data;
+    uint32_t       sum = 0;
+    while (len > 1) {
+        sum += (uint16_t)((uint16_t)p[0] << 8 | p[1]);
+        p += 2;
+        len -= 2;
+    }
+    if (len) sum += (uint16_t)((uint16_t)p[0] << 8);
     while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
     return (uint16_t)~sum;
 }
