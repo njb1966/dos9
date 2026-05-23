@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DOS/9 | A Native Text Operating System</title>
+  <meta
+    name="description"
+    content="DOS/9 is a native 32-bit hobby operating system built around the shell, visible internals, and small-web software with a calm, practical aesthetic."
+  />
+  <meta name="theme-color" content="#edf0e7" />
+  <style>
+    :root {
+      --paper: #f4f0e7;
+      --paper-2: #ebe5d9;
+      --panel: rgba(255, 253, 248, 0.86);
+      --panel-strong: #fffdf8;
+      --ink: #1d2822;
+      --muted: #5f6d66;
+      --faint: #8c968f;
+      --line: rgba(29, 40, 34, 0.12);
+      --line-strong: rgba(29, 40, 34, 0.18);
+      --shadow: 0 28px 70px rgba(32, 46, 39, 0.12);
+      --shadow-soft: 0 16px 40px rgba(32, 46, 39, 0.08);
+      --green: #557c5d;
+      --green-2: #87a27d;
+      --green-3: #b2c1a4;
+      --gold: #b48a57;
+      --gold-soft: rgba(180, 138, 87, 0.14);
+      --cream: #faf7ef;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+      --sans: "Avenir Next", "Gill Sans", "Trebuchet MS", "Segoe UI", sans-serif;
+      color-scheme: light;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--serif);
+      line-height: 1.6;
+      background:
+        radial-gradient(circle at 18% 8%, rgba(175, 196, 164, 0.32), transparent 24rem),
+        radial-gradient(circle at 82% 12%, rgba(180, 138, 87, 0.12), transparent 18rem),
+        linear-gradient(180deg, #f7f4eb 0%, var(--paper) 35%, #f1ede4 100%);
+      min-height: 100vh;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(rgba(255,255,255,0.18), rgba(255,255,255,0.02)),
+        repeating-linear-gradient(
+          90deg,
+          rgba(32, 46, 39, 0.025) 0,
+          rgba(32, 46, 39, 0.025) 1px,
+          transparent 1px,
+          transparent 96px
+        );
+      opacity: 0.38;
+      mix-blend-mode: multiply;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+    }
+
+    .site {
+      position: relative;
+      z-index: 1;
+    }
+
+    .container {
+      width: min(1120px, calc(100% - 2rem));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(29, 40, 34, 0.08);
+      background: rgba(244, 240, 231, 0.78);
+      backdrop-filter: blur(14px);
+    }
+
+    .topbar-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      min-height: 72px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.85rem;
+      font-family: var(--sans);
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .brand img {
+      width: 38px;
+      height: 38px;
+      object-fit: cover;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-soft);
+      background: var(--panel-strong);
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      font-family: var(--sans);
+      font-size: 0.95rem;
+      color: var(--muted);
+    }
+
+    .nav a {
+      padding: 0.35rem 0.55rem;
+      border-radius: 999px;
+      transition: color 0.2s ease, background 0.2s ease;
+    }
+
+    .nav a:hover,
+    .nav a[aria-current="true"] {
+      color: var(--ink);
+      background: rgba(85, 124, 93, 0.08);
+    }
+
+    .hero {
+      padding: clamp(3.5rem, 8vw, 6rem) 0 3.5rem;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.02fr) minmax(320px, 0.98fr);
+      gap: 2rem;
+      align-items: center;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.38rem 0.75rem;
+      border-radius: 999px;
+      border: 1px solid rgba(85, 124, 93, 0.22);
+      background: rgba(85, 124, 93, 0.07);
+      color: var(--green);
+      font-family: var(--sans);
+      font-size: 0.82rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 1.15rem;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+    }
+
+    h1 {
+      font-size: clamp(3rem, 8vw, 6.2rem);
+      max-width: 9ch;
+      margin-bottom: 1rem;
+    }
+
+    .lede {
+      margin: 0;
+      max-width: 38rem;
+      font-size: clamp(1.12rem, 2.2vw, 1.45rem);
+      color: var(--muted);
+    }
+
+    .lede strong {
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.8rem;
+      margin: 1.75rem 0 1.35rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      padding: 0 1rem;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+      cursor: pointer;
+      font-family: var(--sans);
+      font-weight: 650;
+      letter-spacing: 0.01em;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      color: #fdfcf7;
+      background: linear-gradient(180deg, #6a876d 0%, #4e6f55 100%);
+      box-shadow: 0 14px 30px rgba(85, 124, 93, 0.18);
+    }
+
+    .btn-secondary {
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.6);
+      border-color: rgba(29, 40, 34, 0.12);
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      margin-top: 1rem;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.4rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid rgba(29, 40, 34, 0.1);
+      background: rgba(255, 255, 255, 0.58);
+      color: var(--muted);
+      font-family: var(--sans);
+      font-size: 0.85rem;
+    }
+
+    .logo-panel {
+      position: relative;
+      padding: 1.2rem;
+      border-radius: 32px;
+      border: 1px solid rgba(29, 40, 34, 0.11);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.43)),
+        radial-gradient(circle at top, rgba(175, 196, 164, 0.38), transparent 60%);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .logo-panel::before {
+      content: "";
+      position: absolute;
+      inset: -40% -10% auto;
+      height: 50%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.7), transparent);
+      transform: rotate(-12deg);
+      opacity: 0.22;
+      pointer-events: none;
+    }
+
+    .logo-frame {
+      position: relative;
+      border-radius: 24px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.7), rgba(255,255,255,0.22)),
+        rgba(250, 247, 239, 0.92);
+      padding: 1rem;
+      border: 1px solid rgba(29, 40, 34, 0.08);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+    }
+
+    .logo-frame img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 20px;
+    }
+
+    .logo-caption {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-top: 1rem;
+      color: var(--muted);
+      font-family: var(--sans);
+      font-size: 0.92rem;
+    }
+
+    .logo-caption strong {
+      color: var(--ink);
+    }
+
+    section {
+      padding: 2.75rem 0;
+    }
+
+    .section-head {
+      display: grid;
+      gap: 0.8rem;
+      margin-bottom: 1.4rem;
+      max-width: 52rem;
+    }
+
+    .section-head h2 {
+      font-size: clamp(2rem, 4.5vw, 3.25rem);
+    }
+
+    .section-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.04rem;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .card {
+      border-radius: 24px;
+      border: 1px solid rgba(29, 40, 34, 0.1);
+      background: var(--panel);
+      backdrop-filter: blur(10px);
+      box-shadow: var(--shadow-soft);
+      padding: 1.25rem;
+    }
+
+    .card h3 {
+      font-size: 1.28rem;
+      margin-bottom: 0.45rem;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .feature-list {
+      margin: 0.85rem 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 0.5rem;
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 0.95rem;
+    }
+
+    .feature-list li {
+      display: flex;
+      gap: 0.55rem;
+      align-items: flex-start;
+    }
+
+    .feature-list li::before {
+      content: "";
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 999px;
+      margin-top: 0.45rem;
+      background: linear-gradient(180deg, var(--green-2), var(--green));
+      flex: 0 0 auto;
+    }
+
+    .status-card {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.82), rgba(255,255,255,0.56)),
+        rgba(255, 255, 255, 0.8);
+      border-color: rgba(85, 124, 93, 0.2);
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.35rem 0.6rem;
+      margin-bottom: 0.85rem;
+      border-radius: 999px;
+      border: 1px solid rgba(85, 124, 93, 0.18);
+      background: rgba(85, 124, 93, 0.08);
+      color: var(--green);
+      font-family: var(--sans);
+      font-size: 0.78rem;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .status-number {
+      font-size: clamp(2.2rem, 5vw, 4rem);
+      line-height: 0.9;
+      letter-spacing: -0.08em;
+      color: var(--ink);
+    }
+
+    .status-note {
+      font-family: var(--sans);
+      color: var(--muted);
+      text-align: right;
+      max-width: 18rem;
+    }
+
+    .panel {
+      border-radius: 28px;
+      border: 1px solid rgba(29, 40, 34, 0.11);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.88), rgba(255,255,255,0.58)),
+        var(--panel-strong);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.95rem 1.1rem;
+      border-bottom: 1px solid rgba(29, 40, 34, 0.08);
+      background: rgba(237, 240, 231, 0.8);
+      font-family: var(--sans);
+      color: var(--muted);
+    }
+
+    .panel-badges {
+      display: flex;
+      gap: 0.45rem;
+      flex-wrap: wrap;
+    }
+
+    .panel-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.28rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid rgba(29, 40, 34, 0.1);
+      background: rgba(255, 255, 255, 0.7);
+      font-size: 0.8rem;
+    }
+
+    .panel-body {
+      padding: 1.2rem;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 0.55rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    .tab {
+      border-radius: 999px;
+      border: 1px solid rgba(29, 40, 34, 0.1);
+      background: rgba(255,255,255,0.65);
+      color: var(--muted);
+      padding: 0.5rem 0.8rem;
+      cursor: pointer;
+      transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+      font-family: var(--sans);
+      font-size: 0.92rem;
+    }
+
+    .tab:hover {
+      transform: translateY(-1px);
+      background: rgba(85, 124, 93, 0.08);
+      color: var(--ink);
+    }
+
+    .tab[aria-pressed="true"] {
+      background: linear-gradient(180deg, #6d8a70, #55765d);
+      color: #fbfcf8;
+      border-color: transparent;
+    }
+
+    .tab-content {
+      display: none;
+      gap: 0.9rem;
+    }
+
+    .tab-content.is-active {
+      display: grid;
+    }
+
+    .roadmap-list {
+      display: grid;
+      gap: 0.7rem;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+      font-family: var(--sans);
+    }
+
+    .roadmap-list li {
+      display: grid;
+      grid-template-columns: 6.5rem 1fr;
+      gap: 0.9rem;
+      align-items: start;
+      padding: 0.7rem 0.85rem;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.62);
+      border: 1px solid rgba(29, 40, 34, 0.08);
+    }
+
+    .roadmap-list strong {
+      color: var(--green);
+      font-size: 0.88rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .roadmap-list span {
+      color: var(--muted);
+    }
+
+    .mono-box {
+      border-radius: 20px;
+      border: 1px solid rgba(29, 40, 34, 0.11);
+      background: #f8f6ef;
+      padding: 1rem 1.1rem;
+      font-family: var(--mono);
+      color: #314338;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    .build-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+      gap: 1rem;
+      align-items: start;
+    }
+
+    .command-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 0.8rem;
+    }
+
+    .command-btn {
+      border: 1px solid rgba(29, 40, 34, 0.1);
+      background: rgba(85, 124, 93, 0.08);
+      color: var(--green);
+      padding: 0.45rem 0.72rem;
+      border-radius: 999px;
+      cursor: pointer;
+      font-family: var(--sans);
+      font-size: 0.9rem;
+    }
+
+    .command-btn:hover {
+      background: rgba(85, 124, 93, 0.12);
+    }
+
+    footer {
+      padding: 2.6rem 0 3.4rem;
+      color: var(--muted);
+      font-family: var(--sans);
+    }
+
+    .footer-inner {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      border-top: 1px solid rgba(29, 40, 34, 0.08);
+      padding-top: 1.1rem;
+    }
+
+    .footer-inner strong {
+      color: var(--ink);
+    }
+
+    .js .reveal {
+      opacity: 0;
+      transform: translateY(14px);
+      transition: opacity 0.55s ease, transform 0.55s ease;
+    }
+
+    .js .reveal.is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 920px) {
+      .hero-grid,
+      .grid-2,
+      .grid-3,
+      .build-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .status-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .status-note {
+        text-align: left;
+        max-width: none;
+      }
+
+      .nav {
+        display: none;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        width: min(100% - 1.2rem, 1120px);
+      }
+
+      .hero {
+        padding-top: 2.4rem;
+      }
+
+      h1 {
+        max-width: 100%;
+      }
+
+      .roadmap-list li {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="site">
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="#top" aria-label="DOS/9 home">
+          <img src="dos9-logo.png" alt="" />
+          <span>DOS/9</span>
+        </a>
+
+        <nav class="nav" aria-label="Primary">
+          <a href="#about">About</a>
+          <a href="#status">Status</a>
+          <a href="#shape">Shape</a>
+          <a href="#try">Try it</a>
+          <a href="#contact">Contact</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="container hero-grid">
+          <div class="reveal">
+            <div class="eyebrow">Small web · native kernel · 32-bit x86</div>
+            <h1>Simple. Visible. Yours.</h1>
+            <p class="lede">
+              <strong>DOS/9</strong> is a native text operating system for people who like systems they can understand:
+              a shell-first kernel, visible filesystems, and small-web tools that feel practical instead of performative.
+            </p>
+            <div class="hero-actions">
+              <a class="btn btn-primary" href="#status">See the current state</a>
+              <a class="btn btn-secondary" href="#try">Build locally</a>
+            </div>
+            <div class="meta-row" aria-label="Project highlights">
+              <span class="chip">native kernel</span>
+              <span class="chip">QEMU-first, hardware-minded</span>
+              <span class="chip">Plan 9 ideas, DOS temperament</span>
+              <span class="chip">small web without the cosplay</span>
+            </div>
+          </div>
+
+          <div class="logo-panel reveal">
+            <div class="logo-frame">
+              <img src="dos9-logo.png" alt="DOS/9 logo" />
+            </div>
+            <div class="logo-caption">
+              <span><strong>DOS/9</strong> on a calm paper background.</span>
+              <span>Green accents, steel text, no rogue aesthetic.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="about">
+        <div class="container">
+          <div class="section-head reveal">
+            <h2>A practical small-web OS, not a retro costume.</h2>
+            <p>
+              DOS/9 leans toward the fediverse and small-web crowd because the software is meant to be read, trusted,
+              and used daily. The visual style follows the same rule: restrained, legible, and a little warm.
+            </p>
+          </div>
+
+          <div class="grid-3">
+            <article class="card reveal">
+              <h3>The shell is the center</h3>
+              <p>Users drive the system through text, not through a hidden launcher or a simulated desktop layer.</p>
+            </article>
+
+            <article class="card reveal">
+              <h3>Files everywhere</h3>
+              <p>Devices, processes, modules, and network state are exposed through filesystem paths and normal tools.</p>
+            </article>
+
+            <article class="card reveal">
+              <h3>Readable by design</h3>
+              <p>The goal is not maximal abstraction. The goal is a system a motivated person can inspect and extend.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="status">
+        <div class="container">
+          <div class="section-head reveal">
+            <h2>What exists now</h2>
+            <p>
+              The project already boots, reaches a shell, runs userland programs, and includes real networking clients
+              for the small web.
+            </p>
+          </div>
+
+          <div class="grid-2">
+            <article class="card status-card reveal">
+              <div class="status-pill">Current milestone</div>
+              <h3>Phase 4c readers complete</h3>
+              <ul class="feature-list">
+                <li>Native RSS, Finger, IRC, and NNTP clients</li>
+                <li>Gopher and Gemini support in userland</li>
+                <li>Shell, editor, file manager, and package tools on disk</li>
+                <li>QEMU smoke tests for repeatable verification</li>
+              </ul>
+              <div class="status-grid">
+                <div class="status-number">4</div>
+                <div class="status-note">Small-web readers shipped and verified as part of the current tree.</div>
+              </div>
+            </article>
+
+            <article class="panel reveal" aria-label="Current shell scene">
+              <div class="panel-bar">
+                <span>DOS/9 shell session</span>
+                <span class="panel-badges">
+                  <span class="panel-badge">real kernel</span>
+                  <span class="panel-badge">text mode</span>
+                </span>
+              </div>
+              <div class="panel-body">
+                <div class="mono-box" id="terminalCopy">
+DOS/9&gt; ls /disk
+hello.d9p  sh  fm  ed  pkg  gopher  gemini  rss  finger  irc  nntp
+
+DOS/9&gt; /disk/gopher offgridholdout.org 70 /
+menu returned from a real site
+
+DOS/9&gt; /disk/rss mastodon.social 80 /tags/selfhosting.rss
+reader expects host, port, path
+                </div>
+                <div class="command-row">
+                  <span class="chip">interactive shell</span>
+                  <button class="command-btn" data-copy="#terminalCopy">Copy snippet</button>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="shape">
+        <div class="container">
+          <div class="section-head reveal">
+            <h2>How it feels</h2>
+            <p>
+              The site mirrors the project: direct, technical, but not hostile. It should feel more like a good magazine
+              spread than a lurid hacker poster.
+            </p>
+          </div>
+
+          <div class="grid-3">
+            <article class="card reveal">
+              <h3>Warm palette</h3>
+              <p>Paper, olive, graphite, and steel. Enough color to feel alive, not enough to become noisy.</p>
+            </article>
+
+            <article class="card reveal">
+              <h3>Editorial layout</h3>
+              <p>Large type, spacious sections, and structured cards so the page reads quickly on desktop and mobile.</p>
+            </article>
+
+            <article class="card reveal">
+              <h3>Quiet motion</h3>
+              <p>Small interactions, subtle reveal behavior, and simple tabbing instead of flashy parallax or chrome.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="try">
+        <div class="container">
+          <div class="section-head reveal">
+            <h2>Try it locally</h2>
+            <p>
+              The project is built around QEMU for iteration, with smoke tests for network clients and shell behavior.
+            </p>
+          </div>
+
+          <div class="build-grid">
+            <article class="card reveal">
+              <h3>Common commands</h3>
+              <div class="mono-box" id="buildCommands">make
+make disk
+make run
+make smoke-net
+make smoke-rss
+make smoke-finger
+make smoke-irc
+make smoke-nntp
+              </div>
+              <div class="command-row">
+                <span class="chip">cross-compiler + QEMU</span>
+                <button class="command-btn" data-copy="#buildCommands">Copy commands</button>
+              </div>
+            </article>
+
+            <article class="panel reveal">
+              <div class="panel-bar">
+                <span>Roadmap view</span>
+                <span class="panel-badges">
+                  <span class="panel-badge">now</span>
+                  <span class="panel-badge">next</span>
+                  <span class="panel-badge">later</span>
+                </span>
+              </div>
+              <div class="panel-body">
+                <div class="tabs" role="tablist" aria-label="Project roadmap">
+                  <button class="tab" role="tab" aria-pressed="true" data-tab="now">Now</button>
+                  <button class="tab" role="tab" aria-pressed="false" data-tab="next">Next</button>
+                  <button class="tab" role="tab" aria-pressed="false" data-tab="later">Later</button>
+                </div>
+
+                <div class="tab-content is-active" data-panel="now">
+                  <ul class="roadmap-list">
+                    <li><strong>Stable</strong><span>Shell, VFS, process model, filesystem tools, and small-web clients are in the tree.</span></li>
+                    <li><strong>Verified</strong><span>QEMU smoke paths exist for networking and the reader clients.</span></li>
+                    <li><strong>Public face</strong><span>This page gives the project a cleaner, calmer landing spot.</span></li>
+                  </ul>
+                </div>
+
+                <div class="tab-content" data-panel="next">
+                  <ul class="roadmap-list">
+                    <li><strong>Harden</strong><span>Continue narrowing parser, bounds, and compatibility bugs.</span></li>
+                    <li><strong>Validate</strong><span>Keep the VM matrix and hardware-minded checks current.</span></li>
+                    <li><strong>Refine</strong><span>Polish tools and interactions that users actually touch.</span></li>
+                  </ul>
+                </div>
+
+                <div class="tab-content" data-panel="later">
+                  <ul class="roadmap-list">
+                    <li><strong>Aspirational</strong><span>Remote mount ideas and deeper 9P-style namespace work.</span></li>
+                    <li><strong>Optional</strong><span>DOS-era compatibility through an integrated emulation path.</span></li>
+                    <li><strong>Long-term</strong><span>Continue making the system understandable rather than ornamental.</span></li>
+                  </ul>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="contact">
+        <div class="container">
+          <div class="section-head reveal">
+            <h2>Hosted at your domain</h2>
+            <p>
+              The public site is intended for <strong>dos9.njb1966.com</strong> on <strong>209.145.49.66</strong>.
+            </p>
+          </div>
+
+          <div class="grid-2">
+            <article class="card reveal">
+              <h3>What visitors should see</h3>
+              <p>
+                A project page that feels deliberate, small-web-friendly, and technically serious without leaning into
+                the “hacker/warez” look.
+              </p>
+            </article>
+
+            <article class="card reveal">
+              <h3>What to keep visible</h3>
+              <p>
+                The logo, the current status, the build path, and the fact that DOS/9 is a real kernel project rather
+                than a themed distro.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="container footer-inner">
+        <div><strong>DOS/9</strong> · A native text operating system</div>
+        <div>dos9.njb1966.com · 209.145.49.66</div>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    document.documentElement.classList.add('js');
+
+    const tabs = document.querySelectorAll('.tab');
+    const panels = document.querySelectorAll('.tab-content');
+    const navLinks = document.querySelectorAll('.nav a');
+    const sections = document.querySelectorAll('main section[id]');
+
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const target = tab.dataset.tab;
+        tabs.forEach((button) => button.setAttribute('aria-pressed', String(button === tab)));
+        panels.forEach((panel) => panel.classList.toggle('is-active', panel.dataset.panel === target));
+      });
+    });
+
+    document.querySelectorAll('[data-copy]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const target = document.querySelector(button.dataset.copy);
+        if (!target) return;
+
+        const text = target.innerText.replace(/\s+$/g, '');
+
+        try {
+          await navigator.clipboard.writeText(text);
+          const original = button.textContent;
+          button.textContent = 'Copied';
+          window.setTimeout(() => {
+            button.textContent = original;
+          }, 1200);
+        } catch {
+          button.textContent = 'Copy unavailable';
+          window.setTimeout(() => {
+            button.textContent = 'Copy snippet';
+          }, 1200);
+        }
+      });
+    });
+
+    const revealTargets = document.querySelectorAll('.reveal');
+    const revealObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          revealObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12 });
+
+    revealTargets.forEach((item) => revealObserver.observe(item));
+
+    const navObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+
+        navLinks.forEach((link) => {
+          const match = link.getAttribute('href') === `#${entry.target.id}`;
+          link.setAttribute('aria-current', match ? 'true' : 'false');
+        });
+      });
+    }, { rootMargin: '-45% 0px -45% 0px', threshold: 0.1 });
+
+    sections.forEach((section) => navObserver.observe(section));
+  </script>
+</body>
+</html>
