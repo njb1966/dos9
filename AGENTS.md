@@ -1,4 +1,4 @@
-# DOS/9 — Claude Code Context
+# DOS/9 — Codex Agent Context
 
 DOS/9 is a hobbyist OS kernel targeting 32-bit x86. It is conceptually inspired by Plan 9 (per-process namespaces, everything-is-a-file) but runs as a native kernel, not a hosted process. The goal is a working kernel with a shell, VFS, process model, and small-web client support (Gemini, Gopher, RSS, Finger, IRC, and NNTP).
 
@@ -44,7 +44,7 @@ Known non-blocking limitation:
 
 ## Key Reference URLs
 
-These are live browser resources — consult them when the local reference docs don't cover something.
+These are live browser resources. Consult them when the local reference docs do not cover something.
 
 | Resource | URL | What it's for |
 |---|---|---|
@@ -73,17 +73,13 @@ All under `docs/references/`. Key items:
 
 ## Repository
 
-This workspace is local-only.
+This workspace is local-first.
 
 The working copy for Codex lives at:
 
 `/media/nick/1TB_Storage1/projects/tech/DOS9_codex`
 
-Do not write to `tech/DOS9` from this workspace. That directory is the
-separate Claude Code build.
-
-There is no push workflow for this copy. Keep all edits, build outputs,
-and scratch work under `tech/DOS9_codex/`.
+Keep edits, build outputs, and scratch work under `tech/DOS9_codex/`.
 
 ---
 

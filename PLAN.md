@@ -4,7 +4,7 @@
 > **Tagline:** Simple. Visible. Yours.
 > **Sub tagline:** A Native Text Operating System
 > **Status:** Phase 3 complete (2026-05-21) — full userland: shell+scripting, TUI toolkit, file manager, text editor, disk write, argv, package system. Next: Phase 4 (small web / networking).
-> **Repository:** local-only workspace in `tech/DOS9_codex` (see `CLAUDE.md`)
+> **Repository:** local-first workspace in `tech/DOS9_codex` (see `AGENTS.md`)
 
 DOS/9
 Simple. Visible. Yours.
@@ -134,7 +134,7 @@ The honest truth: writing a production OS from scratch is a multi-team, multi-ye
 
 The audience is not "everyone." The audience is the small web community — a few hundred to few thousand people who already love Gemini browsers, mutt, newsboat, tmux, and the aesthetic of computing's simpler eras. **If 200 of them try it and 20 use it weekly, this project has succeeded.**
 
-The developer is one person ("dangerous"-tier programming background) working with an AI coding companion (Claude Code) and the substantial body of public OS-development knowledge: xv6, OSDev Wiki, the Intel SDM, *Operating Systems: Three Easy Pieces*, and the source of every hobby OS ever published.
+The developer is one person ("dangerous"-tier programming background) working with an AI coding companion (Codex) and the substantial body of public OS-development knowledge: xv6, OSDev Wiki, the Intel SDM, *Operating Systems: Three Easy Pieces*, and the source of every hobby OS ever published.
 
 ---
 
@@ -180,7 +180,7 @@ Chosen deliberately:
 - [x] Set up the development environment: cross-compiler (i686-elf-gcc 14.3.0 + binutils 2.46 at `~/tools/cross`), QEMU, GDB, Makefile build system. QEMU is the fast test loop; real hardware compatibility remains a standing target.
 - [x] Decide on the RAG / reference-lookup approach (see §6). (**Option B: grep + AI companion**)
 - [x] Assemble reference corpus in `docs/references/` (see §6).
-- [x] Create `CLAUDE.md` with project context and reference URLs for Claude Code sessions.
+- [x] Create `AGENTS.md` with project context and reference URLs for Codex sessions.
 
 **Exit criteria:** You can describe, in your own words, what a bootloader does, what protected mode is, what a GDT and IDT are, how paging works, and how xv6 structures its process table.
 
@@ -307,7 +307,7 @@ Notes:
 
 ## 5. Working with an AI coding companion
 
-This project will be built with Claude Code as the developer's companion. Some hard-won lessons specific to kernel work:
+This project will be built with Codex as the developer's companion. Some hard-won lessons specific to kernel work:
 
 - **Cross-reference everything.** Kernel code has exact requirements that are easy to get subtly wrong — alignment, bit patterns in descriptors, ordering when setting up paging. When the AI confidently says "set this bit in CR0," verify against OSDev Wiki and the Intel SDM. The training data on this domain is good but not perfect, and one wrong bit in a GDT entry is a triple fault that wastes hours.
 - **The Intel SDM is the ground truth.** Not the AI, not OSDev Wiki, not even xv6. When in doubt, the manual wins.
@@ -334,7 +334,7 @@ Keep the SDM PDFs and OSDev Wiki scraped to markdown in `docs/references/`. Let 
 All located under `docs/references/`. See `docs/references/README.md` for per-item notes, grep tips, and download sources.
 
 - [x] **Intel SDM** — combined PDF (5342 pages) + greppable `.txt`. `intel-sdm/intel-sdm-combined.{pdf,txt}`
-- [x] **OSDev Wiki** — browser-only (https://wiki.osdev.org). Cloudflare blocks scraping; wiki is a living resource so a local copy would drift anyway. URL is in `CLAUDE.md` for every session.
+- [x] **OSDev Wiki** — browser-only (https://wiki.osdev.org). Cloudflare blocks scraping; wiki is a living resource so a local copy would drift anyway. URL is in `AGENTS.md` for every session.
 - [x] **xv6** — source in `xv6/xv6-source/`, book PDF in `xv6/`.
 - [x] **Plan 9 papers** — `plan9/plan9-paper.pdf`, `namespaces.pdf`, `lexical-names.pdf`.
 - [x] **9front** — shallow clone of the active Plan 9 fork. `plan9/9front/`. Key: `sys/src/9/` (kernel), `sys/src/lib9p/` (9P implementation), `rc/` (shell).
@@ -352,7 +352,7 @@ All located under `docs/references/`. See `docs/references/README.md` for per-it
 
 ```
 DOS9/
-├── CLAUDE.md                # Claude Code session context — loaded automatically every session
+├── AGENTS.md                # Codex agent context — loaded automatically every session
 ├── PLAN.md                  # this file
 ├── README.md                # for the public, eventually
 ├── docs/
